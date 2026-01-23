@@ -1,5 +1,28 @@
 # Release Notes
 
+## v0.3.0 (2026-01-23)
+
+### Performance Optimizations
+
+- **Type Stability**: Made struct fields type-stable across all modules:
+  - `Cache.jl`: Fixed `CacheItem{T}` parametric type, typed callbacks with `F where F`
+  - `Errors.jl`: Made `LongPortError{T}` parametric with typed payload
+  - `TradeProtocol.jl`: Made `PushEvent{T}` parametric
+  - `QuotePush.jl`: Made `PushEvent{T}` parametric
+  - `TradePush.jl`: Changed `AbstractString` to `String` in `PushOrderChanged`
+- **Typed Arrays**: Replaced untyped `[]` with typed arrays (`String[]`, `K[]`) in `Cache.jl` and `Client.jl` to avoid `Vector{Any}`
+- **Pre-allocation**: Added `@inbounds` for hot loops in `Utils.jl`
+
+### Refactoring
+
+- **`disconnect!` Function**: Moved `disconnect!` implementations back to `Quote.jl` and `Trade.jl` modules (type defines methods pattern)
+- **Module Cleanup**: Removed unused `__init__` function from `LongPort.jl`
+
+### Bug Fixes
+
+- **QuoteProtocol.jl**: Fixed `ProtoBuf.ProtoBuf.AbstractProtoEncoder` typo → `ProtoBuf.AbstractProtoEncoder`
+- **test/runtest.jl**: Fixed config constructor calls to use correct parameter names and added required `token_expire_time`
+
 ## v0.2.9 (2025-08-25)
 
 ### Bug Fixes
