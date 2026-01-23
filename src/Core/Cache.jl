@@ -29,11 +29,11 @@ SimpleCache
 简单缓存，用于缓存单个值。
 """
 mutable struct SimpleCache{T}
-    item::Union{Nothing, CacheItem}
+    item::Union{Nothing, CacheItem{T}}
     ttl_seconds::Float64
-    
+
     function SimpleCache{T}(ttl_seconds::Float64) where T
-        new(nothing, ttl_seconds)
+        new{T}(nothing, ttl_seconds)
     end
 end
 
@@ -61,13 +61,13 @@ function is_expired(item::CacheItem)::Bool
 end
 
 """
-get_or_update(cache::SimpleCache{T}, update_func::Function) -> T
+get_or_update(cache::SimpleCache{T}, update_func::F) -> T
 
 获取缓存值或更新缓存。
 
 # Arguments
 - `cache::SimpleCache{T}`: 缓存对象
-- `update_func::Function`: 更新函数，应该返回新的值
+- `update_func::F`: 更新函数，应该返回新的值
 
 # Returns
 - `T`: 缓存的值
@@ -81,7 +81,7 @@ result = get_or_update(cache) do
 end
 ```
 """
-function get_or_update(cache::SimpleCache{T}, update_func::Function)::T where T
+function get_or_update(cache::SimpleCache{T}, update_func::F)::T where {T, F}
     # 检查是否有缓存且未过期
     if !isnothing(cache.item) && !is_expired(cache.item)
         return cache.item.data
@@ -104,14 +104,14 @@ function get_or_update(cache::SimpleCache{T}, update_func::Function)::T where T
 end
 
 """
-get_or_update(cache::CacheWithKey{K, V}, key::K, update_func::Function) -> V
+get_or_update(cache::CacheWithKey{K, V}, key::K, update_func::F) -> V
 
 获取带键缓存的值或更新缓存。
 
 # Arguments
 - `cache::CacheWithKey{K, V}`: 缓存对象
 - `key::K`: 缓存键
-- `update_func::Function`: 更新函数，接收key作为参数，返回新的值
+- `update_func::F`: 更新函数，接收key作为参数，返回新的值
 
 # Returns
 - `V`: 缓存的值
@@ -125,7 +125,7 @@ result = get_or_update(cache, "AAPL.US") do symbol
 end
 ```
 """
-function get_or_update(cache::CacheWithKey{K, V}, key::K, update_func::Function)::V where {K, V}
+function get_or_update(cache::CacheWithKey{K, V}, key::K, update_func::F)::V where {K, V, F}
     # 检查是否有缓存且未过期
     if haskey(cache.items, key) && !is_expired(cache.items[key])
         return cache.items[key].data
@@ -179,8 +179,8 @@ cleanup_expired!(cache::CacheWithKey)
 
 清理带键缓存中过期的项。
 """
-function cleanup_expired!(cache::CacheWithKey)
-    expired_keys = []
+function cleanup_expired!(cache::CacheWithKey{K, V}) where {K, V}
+    expired_keys = K[]
     for (key, item) in cache.items
         if is_expired(item)
             push!(expired_keys, key)

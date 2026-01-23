@@ -37,9 +37,15 @@ module Utils
         end
 
         fnames = fieldnames(eltype(data))
+        n = length(data)
         df = DataFrame()
         for fname in fnames
-            df[!, fname] = [(v = getfield(d, fname); v === nothing ? missing : v) for d in data]
+            col = Vector{Any}(undef, n)
+            @inbounds for i in eachindex(data)
+                v = getfield(data[i], fname)
+                col[i] = v === nothing ? missing : v
+            end
+            df[!, fname] = col
         end
 
         return df

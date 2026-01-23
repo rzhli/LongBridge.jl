@@ -939,9 +939,9 @@ module TradeProtocol
     end
 
     # --- Push Event Types ---
-    struct PushEvent
+    struct PushEvent{T}
         topic::TopicType.T
-        data::Any
+        data::T
     end
 
 end # module

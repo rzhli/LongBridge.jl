@@ -25,7 +25,7 @@ module QuoteProtocol
            QuoteUnsubscribeResponse, SubscriptionRequest, SubscriptionResponse, SubTypeList,
 
            Depth, Brokers, PushQuote, PushDepth, PushBrokers, PushTrade,                   # 结构体类型Struct
-           OptionExtend, WarrantExtend, StrikePriceInfo,  SecurityDepthResponse, SecurityBrokersResponse,
+           OptionExtend, WarrantExtend, StrikePriceInfo, SecurityDepthResponse, SecurityBrokersResponse,
            SecurityTradeRequest, SecurityTradeResponse,
            OptionQuote, OptionQuoteResponse, WarrantQuote, WarrantQuoteResponse, 
            ParticipantInfo, ParticipantBrokerIdsResponse,
@@ -1130,7 +1130,7 @@ module QuoteProtocol
         end
         return QuoteUnsubscribeRequest(symbol, getindex(sub_type), unsub_all)
     end
-    function encode(e::ProtoBuf.ProtoBuf.AbstractProtoEncoder, x::QuoteUnsubscribeRequest)
+    function encode(e::ProtoBuf.AbstractProtoEncoder, x::QuoteUnsubscribeRequest)
         initpos = position(e.io)
         !isempty(x.symbol) && encode(e, 1, x.symbol)
         !isempty(x.sub_type) && encode(e, 2, x.sub_type)
