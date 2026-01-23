@@ -21,20 +21,20 @@ module TradePush
     订单回报推送
     """
     struct PushOrderChanged <: PushEvent
-        order_id::AbstractString
+        order_id::String
         status::Int32
         sub_status::Int32
-        submitted_price::AbstractString
+        submitted_price::String
         submitted_quantity::Int64
         executed_quantity::Int64
-        executed_price::AbstractString
-        trigger_price::AbstractString
-        msg::AbstractString
+        executed_price::String
+        trigger_price::String
+        msg::String
         tag::Int32
         triggered_at::Int64
         updated_at::Int64
-        last_share::AbstractString
-        last_price::AbstractString
+        last_share::String
+        last_price::String
 
         function PushOrderChanged(data::PushOrderChanged)
             new(
