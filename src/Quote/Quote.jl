@@ -93,7 +93,7 @@ mutable struct InnerQuoteContext
     cache_issuers::SimpleCache{Vector{Any}}
     cache_option_chain_expiry_dates::CacheWithKey{String, Vector{Any}}
     cache_option_chain_strike_info::CacheWithKey{Tuple{String, Any}, Vector{Any}}
-    cache_trading_sessions::SimpleCache{Any}
+    cache_trading_sessions::SimpleCache{DataFrame}
 
     # Info from Core
     member_id::Int64
@@ -304,7 +304,7 @@ function QuoteContext(config::Config.config)
         SimpleCache{Vector{Any}}(1800.0),
         CacheWithKey{String, Vector{Any}}(1800.0),
         CacheWithKey{Tuple{String, Any}, Vector{Any}}(1800.0),
-        SimpleCache{Any}(7200.0),
+        SimpleCache{DataFrame}(7200.0),
         # Core info
         0, "",
     )
@@ -417,7 +417,7 @@ function history_candlesticks_by_offset(
 
     req = SecurityHistoryCandlestickRequest(symbol, period, adjust_type, HistoryCandlestickQueryType.QUERY_BY_OFFSET, offset_request, nothing, trade_sessions)
     cmd = GenericRequestCmd(QuoteCommand.QueryHistoryCandlestick, req, SecurityCandlestickResponse, Channel(1))
-    @show resp = request(ctx, cmd)
+    resp = request(ctx, cmd)
 
     data = map(resp.candlesticks) do c
         (
