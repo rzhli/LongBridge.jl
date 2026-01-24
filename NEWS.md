@@ -2,6 +2,13 @@
 
 ## v0.3.0 (2026-01-23)
 
+### Breaking Changes
+
+- **Struct Type Changes**: Several struct types are now parametric, which may affect code that explicitly typed these structs:
+  - `LongPortError{T}` (was `LongPortError`)
+  - `PushEvent{T}` in `QuotePush` and `TradeProtocol`
+  - `CacheItem{T}` in `Cache`
+
 ### Performance Optimizations
 
 - **Type Stability**: Made struct fields type-stable across all modules:
