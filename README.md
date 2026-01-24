@@ -18,18 +18,15 @@ Create a `config.toml` file:
 
 ```toml
 # Required
-base_url = "https://openapi.longportapp.com"
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 access_token = "your_access_token"
+token_expire_time = "2025-07-22T00:00:00"  # ISO8601 format, UTC time
 
-# Recommended (for management)
-token_expire_time = "2025-07-22T00:00:00Z"  # ISO8601 format, UTC time
-
-# Optional (uses default if not provided)
-language = "en"
-enable_overnight = false    # Requires subscription to US stock LV1 real-time quotes
-push_candlestick_mode = "Realtime"
+# Optional (uses China endpoints by default)
+# http_url = "https://openapi.longportapp.com"
+# quote_ws_url = "wss://openapi-quote.longportapp.com"
+# trade_ws_url = "wss://openapi-trade.longportapp.com"
 ```
 
 ## Quick Start
@@ -86,19 +83,19 @@ history_data = history_candlesticks_by_date(
 expiry_dates = option_chain_expiry_date_list(ctx, "AAPL.US")
 
 # Get trading days for a market
-trade_days, half_trade_days = trading_days(ctx, "HK", Date(2025, 8, 1), Date(2025, 8, 30))
+trading_days_df = trading_days(ctx, Market.HK, Date(2025, 8, 1), Date(2025, 8, 30))
 
 # Get capital flow for a security
 capital_flow_data = capital_flow(ctx, "700.HK")
 
 # Get market temperature
-temp = market_temperature(ctx, "US")
+temp = market_temperature(ctx, Market.US)
 
 # Get historical market temperature
-history_temp = history_market_temperature(ctx, "US", Date(2025, 7, 1), Date(2025, 7, 31))
+history_temp = history_market_temperature(ctx, Market.US, Date(2025, 7, 1), Date(2025, 7, 31))
 
 # Disconnect
-Quote.disconnect!(ctx)
+disconnect!(ctx)
 ```
 
 ### Trading
@@ -140,7 +137,7 @@ resp = modify_order(ctx, "order_id", 100, 301.0)
 resp = cancel_order(ctx, "order_id")
 
 # Disconnect
-Trade.disconnect!(ctx)
+disconnect!(ctx)
 ```
 
 ### Real-time Quote Subscription
@@ -167,7 +164,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Config.from_toml()`: Load configuration from `config.toml` file
 - `QuoteContext(config)`: Create and connect to `QuoteContext`
 - `TradeContext(config)`: Create and connect to `TradeContext`
-- `disconnect!(ctx)`: Disconnect from the server (need Quote./Trade. as prefix)
+- `disconnect!(ctx)`: Disconnect from the server
 
 ### Quote Fetching
 - `static_info(ctx, symbols)`: Get basic static information for securities

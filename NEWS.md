@@ -10,8 +10,10 @@
   - `TradeProtocol.jl`: Made `PushEvent{T}` parametric
   - `QuotePush.jl`: Made `PushEvent{T}` parametric
   - `TradePush.jl`: Changed `AbstractString` to `String` in `PushOrderChanged`
+  - `Quote.jl`: Changed `cache_trading_sessions` from `SimpleCache{Any}` to `SimpleCache{DataFrame}`
 - **Typed Arrays**: Replaced untyped `[]` with typed arrays (`String[]`, `K[]`) in `Cache.jl` and `Client.jl` to avoid `Vector{Any}`
 - **Pre-allocation**: Added `@inbounds` for hot loops in `Utils.jl`
+- **Code Cleanup**: Removed `@show` debug statement from `history_candlesticks_by_offset`
 
 ### Refactoring
 
