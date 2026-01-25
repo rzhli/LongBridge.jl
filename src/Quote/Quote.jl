@@ -3,23 +3,24 @@ module Quote
 using ProtoBuf, JSON3, Dates, Logging, DataFrames, HTTP
 using Dates: datetime2unix
 using ..Config, ..QuotePush, ..Client, ..QuoteProtocol, ..ControlProtocol, ..Constant
+using ..Commands: AbstractCommand, HttpGetCmd, HttpPostCmd, HttpPutCmd, HttpDeleteCmd, DisconnectCmd
 
 using ..QuoteProtocol: CandlePeriod, AdjustType, TradeSession, SubType, QuoteCommand, Direction,
         SecurityCandlestickRequest, SecurityCandlestickResponse, QuoteSubscribeRequest,
         QuoteSubscribeResponse, QuoteUnsubscribeRequest, QuoteUnsubscribeResponse,
         SubscriptionRequest, SubscriptionResponse,
         MultiSecurityRequest, SecurityQuoteResponse, SecurityRequest, SecurityDepthResponse,
-        SecurityStaticInfo, SecurityStaticInfoResponse, OptionQuoteResponse, 
+        SecurityStaticInfo, SecurityStaticInfoResponse, OptionQuoteResponse,
         WarrantQuoteResponse, SecurityBrokersResponse, ParticipantBrokerIdsResponse,
         SecurityTradeRequest, SecurityTradeResponse, SecurityIntradayRequest, SecurityIntradayResponse,
         SecurityHistoryCandlestickRequest, OffsetQuery, DateQuery, HistoryCandlestickQueryType,
         OptionChainDateListResponse, OptionChainDateStrikeInfoRequest, OptionChainDateStrikeInfoResponse,
         IssuerInfoResponse, WarrantFilterListRequest, FilterConfig, WarrantFilterListResponse,
-        FilterWarrantExpiryDate, FilterWarrantInOutBoundsType, WarrantStatus, WarrantType, 
+        FilterWarrantExpiryDate, FilterWarrantInOutBoundsType, WarrantStatus, WarrantType,
         SortOrderType, WarrantSortBy, MarketTradePeriodResponse, MarketTradeDayRequest, MarketTradeDayResponse,
         CapitalFlowIntradayRequest, CapitalFlowIntradayResponse, CapitalDistributionResponse, MarketTemperatureResponse,
         SecurityListCategory, SecuritiesUpdateMode
-        
+
 using ..Client: WSClient
 using ..Cache: SimpleCache, CacheWithKey, get_or_update, RealtimeStore,
                update_quote!, update_depth!, update_brokers!, update_trades!,
@@ -50,41 +51,13 @@ export QuoteContext,
        realtime_depth, realtime_brokers, realtime_trades, realtime_candlesticks,
        subscribe_candlesticks, unsubscribe_candlesticks
 
-# --- Command Types for the Core Actor ---
-abstract type AbstractCommand end
-
-struct GenericRequestCmd <: AbstractCommand
+# Quote-specific command for WebSocket protobuf requests
+struct GenericRequestCmd{R,T} <: AbstractCommand
     cmd_code::QuoteCommand.T
-    request_pb::Any
-    response_type::Type
-    resp_ch::Channel{Any}                   # response channel
-end
-
-struct HttpGetCmd <: AbstractCommand
-    path::String
-    params::Dict{String,Any}
-    resp_ch::Channel{Any}           # response channel
-end
-
-struct HttpPostCmd <: AbstractCommand
-    path::String
-    body::Dict{String,Any}
+    request_pb::R
+    response_type::Type{T}
     resp_ch::Channel{Any}
 end
-
-struct HttpPutCmd <: AbstractCommand
-    path::String
-    body::Dict{String,Any}
-    resp_ch::Channel{Any}
-end
-
-struct HttpDeleteCmd <: AbstractCommand
-    path::String
-    params::Dict{String,Any}
-    resp_ch::Channel{Any}
-end
-
-struct DisconnectCmd <: AbstractCommand end
 
 # --- Core Actor and Context Structs ---
 

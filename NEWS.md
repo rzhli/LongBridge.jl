@@ -1,5 +1,23 @@
 # Release Notes
 
+## v0.3.1 (2026-01-25)
+
+### Performance Optimizations
+
+- **Type Stability**: Made struct fields type-stable across all modules:
+  - `Commands.jl`: Made `HttpPostCmd{B}` and `HttpPutCmd{B}` parametric to avoid `body::Any` boxing
+  - `Quote.jl`: Made `GenericRequestCmd{R,T}` parametric for type-stable request/response handling
+- **Memory Allocation Reduction**:
+  - `Client.jl`: `sign()` uses `IOBuffer` + `print()` instead of string interpolation to reduce intermediate allocations
+  - `Client.jl`: `send_request_packet()` uses pre-sized `IOBuffer(sizehint=...)` and writes body_len bytes directly instead of creating intermediate array
+  - `Client.jl`: Replaced `"quote_response_$(id)"` with `string("quote_response_", id)` for faster string creation
+
+### Breaking Changes
+
+- **Struct Type Changes**: Several struct types are now parametric:
+  - `HttpPostCmd{B}` and `HttpPutCmd{B}` in `Commands` (was non-parametric)
+  - `GenericRequestCmd{R,T}` in `Quote` (was non-parametric)
+
 ## v0.3.0 (2026-01-23)
 
 ### New Features

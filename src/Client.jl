@@ -56,17 +56,19 @@ function sign(
     
     # 构建待签名字符串
     query = params  # 查询参数
-    
-    str_to_sign = "$(method)|$(path)|$(query)|$(signed_values)|$(signed_headers)|"
-    
+
+    # 使用 IOBuffer 避免多次字符串分配
+    io = IOBuffer()
+    print(io, method, "|", path, "|", query, "|", signed_values, "|", signed_headers, "|")
+
     # 如果有body，添加body的SHA1哈希
     if !isempty(body)
-        body_hash = bytes2hex(SHA.sha1(body))
-        str_to_sign *= body_hash
+        print(io, bytes2hex(SHA.sha1(body)))
     end
-    
+    str_to_sign = String(take!(io))
+
     # 最终的待签名字符串
-    final_str_to_sign = "HMAC-SHA256|$(bytes2hex(SHA.sha1(str_to_sign)))"
+    final_str_to_sign = string("HMAC-SHA256|", bytes2hex(SHA.sha1(str_to_sign)))
     
     # 使用HMAC-SHA256生成签名
     signature = bytes2hex(SHA.hmac_sha256(Vector{UInt8}(app_secret), final_str_to_sign))
@@ -74,54 +76,69 @@ function sign(
     return "HMAC-SHA256 SignedHeaders=$(signed_headers), Signature=$(signature)"
 end
 
-# ==================== HTTP Client (简化版本仅用于获取OTP) ====================
+# ==================== HTTP Client ====================
 
-"""
-get(config::Config.config, path::String; params::Dict{String, String}=Dict{String, String}()) -> JSON3.Object
-通用HTTP get函数
-"""
-
-function get(config::Config.config, path::String; params::Dict{String,Any} = Dict{String,Any}())
-    try
-        # 构建请求URL
-        base_url = config.http_url
-        query_parts = String[]
-        for (k, v) in params
-            if v isa Vector
-                for val in v
-                    push!(query_parts, "$(k)=$(HTTP.URIs.escapeuri(val))")
-                end
-            else
-                push!(query_parts, "$(k)=$(HTTP.URIs.escapeuri(string(v)))")
+# 构建 query string
+function _build_query_string(params::Dict{String,Any})
+    isempty(params) && return ""
+    parts = String[]
+    for (k, v) in params
+        if v isa Vector
+            for val in v
+                push!(parts, "$(k)=$(HTTP.URIs.escapeuri(val))")
             end
+        else
+            push!(parts, "$(k)=$(HTTP.URIs.escapeuri(string(v)))")
         end
-        query_string = join(query_parts, "&")
+    end
+    join(parts, "&")
+end
+
+# 通用 HTTP 请求函数
+function _http_request(config::Config.config, method::String, path::String;
+                       params::Dict{String,Any}=Dict{String,Any}(),
+                       body::Union{Dict,Nothing}=nothing)
+    try
+        base_url = config.http_url
+        query_string = _build_query_string(params)
         full_url = base_url * path * (isempty(query_string) ? "" : "?" * query_string)
 
-        # 生成时间戳
         timestamp = string(floor(Int, time() * 1000))
-        
-        # 构建请求头
         headers = Dict{String, String}(
             "X-Api-Key" => config.app_key,
             "Authorization" => "Bearer $(config.access_token)",
             "X-Timestamp" => timestamp,
             "Content-Type" => "application/json; charset=utf-8"
         )
-        
-        # 生成签名
-        signature = sign("GET", path, headers, query_string, "", config)
+
+        body_str = isnothing(body) ? "" : JSON3.write(body)
+        signature = sign(method, path, headers, query_string, body_str, config)
         headers["X-Api-Signature"] = signature
-        
-        # 发送HTTP GET请求
-        response = HTTP.get(full_url, headers = headers, pool = POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
-        
-        return response
+
+        if method in ("GET", "DELETE")
+            http_fn = method == "GET" ? HTTP.get : HTTP.delete
+            return http_fn(full_url; headers, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
+        else
+            http_fn = method == "POST" ? HTTP.post : HTTP.put
+            return http_fn(full_url; headers, body=body_str, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
+        end
     catch e
-        @error "HTTP GET请求异常" path=path exception=(e, catch_backtrace())
+        @error "HTTP $method 请求异常" path=path exception=(e, catch_backtrace())
         rethrow(e)
     end
 end
+
+get(config::Config.config, path::String; params::Dict{String,Any}=Dict{String,Any}()) =
+    _http_request(config, "GET", path; params)
+
+post(config::Config.config, path::String; body::Dict=Dict()) =
+    _http_request(config, "POST", path; body)
+
+put(config::Config.config, path::String; body::Dict=Dict()) =
+    _http_request(config, "PUT", path; body)
+
+delete(config::Config.config, path::String; params::Dict{String,Any}=Dict{String,Any}()) =
+    _http_request(config, "DELETE", path; params)
 
 """
 refresh_token(config::Config.config, expired_at::String) -> Dict
@@ -172,107 +189,6 @@ function get_otp(config::Config.config)::NamedTuple{(:otp, :limit, :online), Tup
         end
     catch e
         @error "获取OTP失败" exception=(e, catch_backtrace())
-        rethrow(e)
-    end
-end
-
-"""
-post(config::Config.config, path::String, data::Dict) -> JSON3.Object
-通用HTTP POST函数用于交易API
-"""
-function post(config::Config.config, path::String; body::Dict=Dict())
-    try
-        # 构建请求URL
-        base_url = config.http_url
-        full_url = base_url * path
-        
-        # 生成时间戳
-        timestamp = string(floor(Int, time() * 1000))
-        
-        # 序列化请求体
-        body_str = JSON3.write(body)
-        
-        # 构建请求头
-        headers = Dict{String, String}(
-            "X-Api-Key" => config.app_key,
-            "Authorization" => "Bearer $(config.access_token)",
-            "X-Timestamp" => timestamp,
-            "Content-Type" => "application/json; charset=utf-8"
-        )
-        
-        # 生成签名
-        signature = sign("POST", path, headers, "", body_str, config)
-        headers["X-Api-Signature"] = signature
-        
-        # 发送HTTP POST请求
-        response = HTTP.post(full_url, headers = headers, body = body_str, pool = POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
-        
-        return response
-    catch e
-        @error "HTTP POST请求异常" path=path exception=(e, catch_backtrace())
-        rethrow(e)
-    end
-end
-
-function put(config::Config.config, path::String; body::Dict=Dict())
-    try
-        base_url = config.http_url
-        full_url = base_url * path
-        timestamp = string(floor(Int, time() * 1000))
-        body_str = JSON3.write(body)
-        
-        headers = Dict{String, String}(
-            "X-Api-Key" => config.app_key,
-            "Authorization" => "Bearer $(config.access_token)",
-            "X-Timestamp" => timestamp,
-            "Content-Type" => "application/json; charset=utf-8"
-        )
-        
-        signature = sign("PUT", path, headers, "", body_str, config)
-        headers["X-Api-Signature"] = signature
-        
-        response = HTTP.put(full_url, headers = headers, body = body_str, pool = POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
-        
-        return response
-    catch e
-        @error "HTTP PUT请求异常" path=path exception=(e, catch_backtrace())
-        rethrow(e)
-    end
-end
-
-function delete(config::Config.config, path::String; params::Dict{String,Any} = Dict{String,Any}())
-    try
-        base_url = config.http_url
-        query_parts = String[]
-        for (k, v) in params
-            if v isa Vector
-                for val in v
-                    push!(query_parts, "$(k)=$(HTTP.URIs.escapeuri(val))")
-                end
-            else
-                push!(query_parts, "$(k)=$(HTTP.URIs.escapeuri(string(v)))")
-            end
-        end
-        query_string = join(query_parts, "&")
-        full_url = base_url * path * (isempty(query_string) ? "" : "?" * query_string)
-
-        timestamp = string(floor(Int, time() * 1000))
-        
-        headers = Dict{String, String}(
-            "X-Api-Key" => config.app_key,
-            "Authorization" => "Bearer $(config.access_token)",
-            "X-Timestamp" => timestamp,
-            "Content-Type" => "application/json; charset=utf-8"
-        )
-        
-        signature = sign("DELETE", path, headers, query_string, "", config)
-        headers["X-Api-Signature"] = signature
-        
-        response = HTTP.delete(full_url, headers = headers, pool = POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
-        
-        return response
-    catch e
-        @error "HTTP DELETE请求异常" path=path exception=(e, catch_backtrace())
         rethrow(e)
     end
 end
@@ -427,50 +343,47 @@ function send_request_packet(client::WSClient, cmd::UInt8, body::Vector{UInt8})
     if isnothing(client.ws) || !isopen(client.ws.io)
         throw(ArgumentError("WebSocket物理连接不存在"))
     end
-    
+
     try
         # 构建数据包
         request_id = client.seq_id
         client.seq_id += 1
-        
+
         # 构建数据包头部
         # 根据长桥协议：[header(1)] + [cmd_code(1)] + [request_id(4)] + [timeout(2)] + [body_len(3)] + [body]
-        packet = IOBuffer()
-        
+        # Pre-size IOBuffer: 11 bytes header + body length
+        body_len = length(body)
+        packet = IOBuffer(sizehint = 11 + body_len)
+
         # Header byte: type=1 (request), verify=0, gzip=0, reserve=0
         # Format: [reserve(2)] + [gzip(1)] + [verify(1)] + [type(4)]
-        header_byte = 0b00000001  # reserve=0, gzip=0, verify=0, type=1
-        write(packet, header_byte)
-        
+        write(packet, 0x01)  # header_byte
+
         # Command code (1 byte)
         write(packet, cmd)
-        
+
         # Request ID (4 bytes, big-endian)
         write(packet, hton(request_id))
-        
+
         # Timeout (2 bytes, big-endian) - 30 seconds default
         write(packet, hton(UInt16(REQUEST_TIMEOUT * 1000)))
-        
-        # Body length (3 bytes, big-endian)
-        body_len = length(body)
-        body_len_bytes = [
-            UInt8((body_len >> 16) & 0xFF),
-            UInt8((body_len >> 8) & 0xFF),
-            UInt8(body_len & 0xFF)
-        ]
-        write(packet, body_len_bytes)
-        
+
+        # Body length (3 bytes, big-endian) - write directly to avoid allocation
+        write(packet, UInt8((body_len >> 16) & 0xFF))
+        write(packet, UInt8((body_len >> 8) & 0xFF))
+        write(packet, UInt8(body_len & 0xFF))
+
         # Body
         write(packet, body)
-        
+
         # 发送数据包
         packet_data = take!(packet)
         send(client.ws, packet_data)
-        
+
         @debug "已发送请求数据包" cmd=cmd request_id=request_id body_len=body_len
-        
+
         return request_id
-        
+
     catch e
         @error "发送请求数据包失败" exception=(e, catch_backtrace())
         rethrow(e)
@@ -594,8 +507,8 @@ function start_message_loop(client::WSClient)
                             end
                         end
                         
-                        # 存储响应数据
-                        response_key = "quote_response_$(request_id)"
+                        # 存储响应数据 (使用 string() 替代插值以提高效率)
+                        response_key = string("quote_response_", request_id)
                         client.pending_responses[response_key] = (status_code, body)
                         @debug "存储响应" response_key=response_key pending_keys=keys(client.pending_responses)
                     elseif packet_type == 3  # Push packet
@@ -778,8 +691,8 @@ function ws_request(
 
     request_id = send_request_packet(client, command_code, request_body)
     
-    # 等待响应
-    response_key = "quote_response_$(request_id)"
+    # 等待响应 (使用 string() 替代插值以提高效率)
+    response_key = string("quote_response_", request_id)
     start_time = time()
     
     while !haskey(client.pending_responses, response_key) && (time() - start_time) < timeout
