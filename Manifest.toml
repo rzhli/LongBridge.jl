@@ -218,7 +218,7 @@ version = "1.2.0"
 deps = ["Base64", "CodecZlib", "DataFrames", "Dates", "EnumX", "HTTP", "JSON3", "Logging", "Printf", "ProtoBuf", "Revise", "SHA", "StructTypes", "TOML", "URIs"]
 path = "."
 uuid = "622b4643-1e26-4658-857c-37e2e088d33f"
-version = "0.2.9"
+version = "0.3.0"
 
 [[deps.LoweredCodeUtils]]
 deps = ["CodeTracking", "Compiler", "JuliaInterpreter"]
@@ -340,9 +340,9 @@ version = "1.2.2"
 
 [[deps.Revise]]
 deps = ["CodeTracking", "FileWatching", "InteractiveUtils", "JuliaInterpreter", "LibGit2", "LoweredCodeUtils", "OrderedCollections", "Preferences", "REPL", "UUIDs"]
-git-tree-sha1 = "dfd6fab9aa325b382773b8930998ce84c2918e5e"
+git-tree-sha1 = "14d1bfb0a30317edc77e11094607ace3c800f193"
 uuid = "295af30f-e4ad-537b-8983-00126c2a3abe"
-version = "3.13.1"
+version = "3.13.2"
 
     [deps.Revise.extensions]
     DistributedExt = "Distributed"
