@@ -12,7 +12,47 @@ References:
 
 2. [OpenAPI SDK Base](https://github.com/longportapp/openapi)
 
-### Configuration File
+## Quick Start
+
+### Installation
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/rzhli/LongPort.jl")
+```
+
+### Authentication
+
+LongBridge supports two authentication methods:
+
+#### 1. OAuth 2.0 (Recommended)
+
+OAuth 2.0 uses Bearer tokens without requiring HMAC signatures. Tokens are persisted locally and refreshed automatically.
+
+**Step 1: Register an OAuth client**
+
+```bash
+curl -X POST https://openapi.longbridgeapp.com/oauth2/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_name": "My Application",
+    "redirect_uris": ["http://localhost:60355/callback"],
+    "grant_types": ["authorization_code", "refresh_token"]
+  }'
+```
+
+**Step 2: Build OAuth handle and create config**
+
+```julia
+using LongBridge
+
+oauth = OAuthBuilder("your-client-id") |> build(url -> run(`xdg-open $url`))
+cfg = Config.from_oauth(oauth)
+```
+
+On first run, this opens the browser for authorization. Subsequent runs use the cached token automatically.
+
+#### 2. API Key (Legacy)
 
 Create a `config.toml` file:
 
@@ -29,13 +69,10 @@ token_expire_time = "2025-07-22T00:00:00"  # ISO8601 format, UTC time
 # trade_ws_url = "wss://openapi-trade.longportapp.com"
 ```
 
-## Quick Start
-
-### Installation
-
 ```julia
-using Pkg
-Pkg.add("LongBridge")
+using LongBridge
+
+cfg = Config.from_toml()
 ```
 
 ### Quotes
@@ -43,7 +80,6 @@ Pkg.add("LongBridge")
 ```julia
 using LongBridge
 
-# Load configuration from TOML file
 cfg = Config.from_toml()
 
 # Create and connect to QuoteContext
@@ -103,7 +139,6 @@ disconnect!(ctx)
 ```julia
 using LongBridge
 
-# Load configuration from TOML file
 cfg = Config.from_toml()
 
 # Create and connect to TradeContext
@@ -162,6 +197,8 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 
 ### Context Management
 - `Config.from_toml()`: Load configuration from `config.toml` file
+- `Config.from_oauth(oauth_handle)`: Create configuration from an OAuth handle
+- `OAuthBuilder(client_id) |> build(open_url_fn)`: Build an OAuth handle with browser-based authorization
 - `QuoteContext(config)`: Create and connect to `QuoteContext`
 - `TradeContext(config)`: Create and connect to `TradeContext`
 - `disconnect!(ctx)`: Disconnect from the server

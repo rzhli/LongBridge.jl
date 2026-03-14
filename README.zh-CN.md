@@ -12,33 +12,67 @@
 
 2. [OpenAPI SDK Base](https://github.com/longportapp/openapi)
 
-### 配置文件
-
-创建 `config.toml` 文件：
-
-```toml
-# 必填项
-base_url = "https://openapi.longportapp.com"
-app_key = "your_app_key"
-app_secret = "your_app_secret"
-access_token = "your_access_token"
-
-# 推荐填写（辅助管理）
-token_expire_time = 2025-07-22T00:00:00Z  # ISO8601格式，UTC时间
-
-# 可选项（不填使用默认）
-language = "zh_CN"
-enable_overnight = false    # 需要订阅美股LV1实时行情
-push_candlestick_mode = "Realtime"
-```
-
 ## 快速开始
 
 ### 安装
 
 ```julia
 using Pkg
-Pkg.add("LongBridge")
+Pkg.add(url="https://github.com/rzhli/LongPort.jl")
+```
+
+### 认证
+
+LongBridge 支持两种认证方式：
+
+#### 1. OAuth 2.0（推荐）
+
+OAuth 2.0 使用 Bearer Token，无需 HMAC 签名。Token 自动持久化到本地并自动刷新。
+
+**第一步：注册 OAuth 客户端**
+
+```bash
+curl -X POST https://openapi.longbridgeapp.com/oauth2/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_name": "My Application",
+    "redirect_uris": ["http://localhost:60355/callback"],
+    "grant_types": ["authorization_code", "refresh_token"]
+  }'
+```
+
+**第二步：构建 OAuth 句柄并创建配置**
+
+```julia
+using LongBridge
+
+oauth = OAuthBuilder("your-client-id") |> build(url -> run(`xdg-open $url`))
+cfg = Config.from_oauth(oauth)
+```
+
+首次运行时会打开浏览器进行授权，后续运行自动使用缓存的 Token。
+
+#### 2. API Key（传统方式）
+
+创建 `config.toml` 文件：
+
+```toml
+# 必填项
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+access_token = "your_access_token"
+token_expire_time = "2025-07-22T00:00:00"  # ISO8601格式，UTC时间
+
+# 可选项（不填使用默认值，默认为中国大陆节点）
+# http_url = "https://openapi.longportapp.com"
+# quote_ws_url = "wss://openapi-quote.longportapp.com"
+# trade_ws_url = "wss://openapi-trade.longportapp.com"
+```
+
+```julia
+using LongBridge
+
+cfg = Config.from_toml()
 ```
 
 ### 行情
@@ -46,7 +80,6 @@ Pkg.add("LongBridge")
 ```julia
 using LongBridge
 
-# 从 TOML 配置文件加载配置
 cfg = Config.from_toml()
 
 # 创建并连接 QuoteContext
@@ -61,7 +94,7 @@ quotes = realtime_quote(ctx, ["GOOGL.US", "AAPL.US", "TSLA.US"])
 # 获取期权实时行情
 resp = option_quote(ctx, ["AAPL230317P160000.US"])
 
-# 获取轮证实时行情 
+# 获取轮证实时行情
 resp = warrant_quote(ctx, ["14993.HK", "66642.HK"])
 
 # 获取标的盘口
@@ -86,19 +119,19 @@ history_data = history_candlesticks_by_date(
 expiry_dates = option_chain_expiry_date_list(ctx, "AAPL.US")
 
 # 获取市场交易日
-trade_days, half_trade_days = trading_days(ctx, "HK", Date(2025, 8, 1), Date(2025, 8, 30))
+trading_days_df = trading_days(ctx, Market.HK, Date(2025, 8, 1), Date(2025, 8, 30))
 
 # 获取标的当日资金流向
 capital_flow_data = capital_flow(ctx, "700.HK")
 
 # 获取市场温度
-temp = market_temperature(ctx, "US")
+temp = market_temperature(ctx, Market.US)
 
 # 获取历史市场温度
-history_temp = history_market_temperature(ctx, "US", Date(2025, 7, 1), Date(2025, 7, 31))
+history_temp = history_market_temperature(ctx, Market.US, Date(2025, 7, 1), Date(2025, 7, 31))
 
 # 断开连接
-Quote.disconnect!(ctx)
+disconnect!(ctx)
 ```
 
 ### 交易
@@ -106,8 +139,7 @@ Quote.disconnect!(ctx)
 ```julia
 using LongBridge
 
-# 从 TOML 配置文件加载配置
-cfg = from_toml()
+cfg = Config.from_toml()
 
 # 创建并连接 TradeContext
 ctx = TradeContext(cfg)
@@ -140,7 +172,7 @@ resp = modify_order(ctx, "order_id", 100, 301.0)
 resp = cancel_order(ctx, "order_id")
 
 # 断开连接
-Trade.disconnect!(ctx)
+disconnect!(ctx)
 ```
 
 ### 实时行情订阅
@@ -165,6 +197,8 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 
 ### 上下文管理
 - `Config.from_toml()`: 从 `config.toml` 文件加载配置
+- `Config.from_oauth(oauth_handle)`: 从 OAuth 句柄创建配置
+- `OAuthBuilder(client_id) |> build(open_url_fn)`: 构建 OAuth 句柄，通过浏览器进行授权
 - `QuoteContext(config)`: 创建并连接 `QuoteContext`
 - `TradeContext(config)`: 创建并连接 `TradeContext`
 - `disconnect!(ctx)`: 断开与服务器的连接
