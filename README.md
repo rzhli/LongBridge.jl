@@ -18,7 +18,7 @@ References:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/rzhli/LongPort.jl")
+Pkg.add(url="https://github.com/rzhli/LongBridge.jl")
 ```
 
 ### Authentication
