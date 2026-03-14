@@ -217,7 +217,7 @@ version = "1.2.0"
 [[deps.LongBridge]]
 deps = ["Base64", "CodecZlib", "DataFrames", "Dates", "EnumX", "HTTP", "JSON3", "Logging", "Printf", "ProtoBuf", "Random", "Revise", "SHA", "StructTypes", "TOML", "URIs"]
 path = "."
-uuid = "622b4643-1e26-4658-857c-37e2e088d33f"
+uuid = "d6178d20-a635-452c-a447-f7a195f79261"
 version = "0.3.1"
 
 [[deps.LoweredCodeUtils]]

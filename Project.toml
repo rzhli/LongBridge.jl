@@ -1,5 +1,5 @@
 name = "LongBridge"
-uuid = "622b4643-1e26-4658-857c-37e2e088d33f"
+uuid = "d6178d20-a635-452c-a447-f7a195f79261"
 keywords = ["LongBridge", "openapi", "sdk", "finance"]
 license = "MIT"
 version = "0.4.0"
