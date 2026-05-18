@@ -30,7 +30,7 @@ function open_browser(url)
     run(cmd)
 end
 
-oauth = OAuthBuilder("efc611f7-4be8-423e-8224-5ba89a707a1d") |> build(open_browser)
+oauth = OAuthBuilder("your_client_id") |> build(open_browser)
 cfg   = Config.from_oauth(oauth)
 
 # ── 创建 4 个 P1 Context ─────────────────────────────────────────────────
