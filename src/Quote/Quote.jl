@@ -1,6 +1,6 @@
 module Quote
 
-using ProtoBuf, JSON3, Dates, Logging, DataFrames, HTTP
+using ProtoBuf, JSON3, Dates, Logging, DataFrames, HTTP, EnumX
 using Dates: datetime2unix
 using ..Config, ..QuotePush, ..Client, ..QuoteProtocol, ..ControlProtocol, ..Constant
 using ..Commands: AbstractCommand, HttpGetCmd, HttpPostCmd, HttpPutCmd, HttpDeleteCmd, DisconnectCmd
@@ -26,7 +26,7 @@ using ..Cache: SimpleCache, CacheWithKey, get_or_update, RealtimeStore,
                update_quote!, update_depth!, update_brokers!, update_trades!,
                get_quote, get_depth, get_brokers, get_trades, get_candlesticks,
                update_candlesticks!, clear_candlesticks!
-using ..Utils: to_namedtuple, to_china_time, Arc
+using ..Utils: to_namedtuple, to_china_time, Arc, symbol_to_counter_id, counter_id_to_symbol
 using ..QuoteProtocol: PushQuote, PushDepth, PushBrokers, Trade, Candlestick
 
 using ..Errors
@@ -963,5 +963,190 @@ function disconnect!(ctx::QuoteContext)
         end
     end
 end
+
+# ════════════════════════════════════════════════════════════════════════
+# v4.1.0 新增 HTTP-only 方法（直接走 Client.http_get/post，不经 actor）
+# ════════════════════════════════════════════════════════════════════════
+
+using StructTypes
+
+# ── short_positions ────────────────────────────────────────────────────
+
+"""
+美股做空数据中的一条记录（FINRA 双月公布）。所有数值字段在原始 API 中均为字符串。
+"""
+struct ShortPosition
+    timestamp::String
+    rate::String
+    avg_daily_share_volume::String
+    current_shares_short::String
+    days_to_cover::String
+    close::String
+end
+StructTypes.StructType(::Type{ShortPosition}) = StructTypes.Struct()
+
+struct ShortPositionsResponse
+    symbol::String
+    data::Vector{ShortPosition}
+    sources::Int
+end
+StructTypes.StructType(::Type{ShortPositionsResponse}) = StructTypes.CustomStruct()
+function StructTypes.construct(::Type{ShortPositionsResponse}, obj::JSON3.Object)
+    items = if haskey(obj, :data) && !isnothing(obj.data)
+        [JSON3.read(JSON3.write(x), ShortPosition) for x in obj.data]
+    else
+        ShortPosition[]
+    end
+    ShortPositionsResponse(
+        counter_id_to_symbol(String(get(obj, :counter_id, ""))),
+        items,
+        Int(get(obj, :sources, 0)),
+    )
+end
+
+"""
+    short_positions(ctx::QuoteContext, symbol) -> ShortPositionsResponse
+
+美股做空数据（空头比例、平仓天数、空头股数）。固定 `last_timestamp=0, page_size=100`。
+
+端点：`GET /v1/quote/short-positions/us`
+"""
+function short_positions(ctx::QuoteContext, symbol::AbstractString)
+    params = Dict{String,Any}(
+        "counter_id"     => symbol_to_counter_id(symbol),
+        "last_timestamp" => 0,
+        "page_size"      => 100,
+    )
+    resp = Errors.ApiResponse(Client.http_get(ctx.inner.config, "/v1/quote/short-positions/us"; params))
+    resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    StructTypes.construct(ShortPositionsResponse, resp.data)
+end
+
+# ── option_volume ──────────────────────────────────────────────────────
+
+"""
+认购/认沽实时成交量统计。`c` 为 call 总量，`p` 为 put 总量（均为字符串）。
+"""
+struct OptionVolumeStats
+    c::String
+    p::String
+end
+StructTypes.StructType(::Type{OptionVolumeStats}) = StructTypes.CustomStruct()
+function StructTypes.construct(::Type{OptionVolumeStats}, obj::JSON3.Object)
+    OptionVolumeStats(String(get(obj, :c, "")), String(get(obj, :p, "")))
+end
+
+"""
+    option_volume(ctx::QuoteContext, symbol) -> OptionVolumeStats
+
+某标的的实时期权认购/认沽成交量。
+
+端点：`GET /v1/quote/option-volume-stats`（query 参数名是 `underlying_counter_id`）
+"""
+function option_volume(ctx::QuoteContext, symbol::AbstractString)
+    params = Dict{String,Any}("underlying_counter_id" => symbol_to_counter_id(symbol))
+    resp = Errors.ApiResponse(Client.http_get(ctx.inner.config, "/v1/quote/option-volume-stats"; params))
+    resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    StructTypes.construct(OptionVolumeStats, resp.data)
+end
+
+# ── option_volume_daily ────────────────────────────────────────────────
+
+"""
+某一日的期权成交统计（含 call/put 量、未平仓量及比率），所有数值字段在 API 中为字符串。
+"""
+struct OptionVolumeDailyStat
+    symbol::String                     # 由 underlying_counter_id 转换
+    timestamp::String
+    total_volume::String
+    total_put_volume::String
+    total_call_volume::String
+    put_call_volume_ratio::String
+    total_open_interest::String
+    total_put_open_interest::String
+    total_call_open_interest::String
+    put_call_open_interest_ratio::String
+end
+StructTypes.StructType(::Type{OptionVolumeDailyStat}) = StructTypes.CustomStruct()
+function StructTypes.construct(::Type{OptionVolumeDailyStat}, obj::JSON3.Object)
+    OptionVolumeDailyStat(
+        counter_id_to_symbol(String(get(obj, :underlying_counter_id, ""))),
+        String(get(obj, :timestamp, "")),
+        String(get(obj, :total_volume, "")),
+        String(get(obj, :total_put_volume, "")),
+        String(get(obj, :total_call_volume, "")),
+        String(get(obj, :put_call_volume_ratio, "")),
+        String(get(obj, :total_open_interest, "")),
+        String(get(obj, :total_put_open_interest, "")),
+        String(get(obj, :total_call_open_interest, "")),
+        String(get(obj, :put_call_open_interest_ratio, "")),
+    )
+end
+
+struct OptionVolumeDaily
+    stats::Vector{OptionVolumeDailyStat}
+end
+StructTypes.StructType(::Type{OptionVolumeDaily}) = StructTypes.CustomStruct()
+function StructTypes.construct(::Type{OptionVolumeDaily}, obj::JSON3.Object)
+    items = if haskey(obj, :stats) && !isnothing(obj.stats)
+        [StructTypes.construct(OptionVolumeDailyStat, x) for x in obj.stats]
+    else
+        OptionVolumeDailyStat[]
+    end
+    OptionVolumeDaily(items)
+end
+
+"""
+    option_volume_daily(ctx::QuoteContext, symbol, timestamp::Integer, count::Integer) -> OptionVolumeDaily
+
+历史日度期权成交统计。`timestamp` 是 unix 起始秒数；`count` 是要拿的日数（作为 `line_num`，方向固定向后）。
+
+端点：`GET /v1/quote/option-volume-stats/daily`
+"""
+function option_volume_daily(ctx::QuoteContext, symbol::AbstractString, timestamp::Integer, count::Integer)
+    params = Dict{String,Any}(
+        "counter_id" => symbol_to_counter_id(symbol),
+        "timestamp"  => Int64(timestamp),
+        "line_num"   => Int(count),
+        "direction"  => 1,
+    )
+    resp = Errors.ApiResponse(Client.http_get(ctx.inner.config, "/v1/quote/option-volume-stats/daily"; params))
+    resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    StructTypes.construct(OptionVolumeDaily, resp.data)
+end
+
+# ── update_pinned ──────────────────────────────────────────────────────
+
+@enumx PinnedMode begin
+    Add    = 1   # 置顶
+    Remove = 2   # 取消置顶
+end
+
+_pinned_mode_str(m::PinnedMode.T) =
+    m === PinnedMode.Add    ? "add"    :
+    m === PinnedMode.Remove ? "remove" :
+    error("unknown PinnedMode: $m")
+
+"""
+    update_pinned(ctx::QuoteContext, mode::PinnedMode.T, symbols::Vector{String})
+
+把指定证券置顶（或取消置顶）到自选股分组顶部。
+
+端点：`POST /v1/watchlist/pinned`
+"""
+function update_pinned(ctx::QuoteContext, mode::PinnedMode.T, symbols::Vector{String})
+    body = Dict{String,Any}(
+        "mode"       => _pinned_mode_str(mode),
+        "securities" => symbols,
+    )
+    resp = Errors.ApiResponse(Client.http_post(ctx.inner.config, "/v1/watchlist/pinned"; body))
+    resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    return nothing
+end
+
+export ShortPosition, ShortPositionsResponse,
+       OptionVolumeStats, OptionVolumeDailyStat, OptionVolumeDaily,
+       PinnedMode,
+       short_positions, option_volume, option_volume_daily, update_pinned
 
 end # module Quote

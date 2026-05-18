@@ -4,6 +4,12 @@ using LongBridge.Config
 using LongBridge.OAuth
 using Dates
 
+# P0 新增 Context 烟测
+include("test_p0_smoke.jl")
+
+# P1 新增 Context 烟测
+include("test_p1_smoke.jl")
+
 @testset "Config defaults" begin
     mktemp() do f, io
         write(io, """

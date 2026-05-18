@@ -1,0 +1,184 @@
+"""
+LongBridge Julia SDK — P0 Analytics Examples
+
+本文件演示 v4.1.0 移植过来的 4 个 HTTP-only Context 的用法，外加 QuoteContext 的 4 个新方法。
+所有调用都是同步阻塞的 REST 请求；institution_rating 和 profit_analysis 内部用 Threads.@spawn 并行 fan-out。
+
+运行前请先设置 OAuth client_id（替换下面的占位符）。
+"""
+
+using LongBridge, Dates
+
+# ── OAuth 初始化（跨平台浏览器回调） ─────────────────────────────────────
+
+function open_browser(url)
+    cmd = if Sys.islinux()
+        `xdg-open $url`
+    elseif Sys.isapple()
+        `open $url`
+    elseif Sys.iswindows()
+        `cmd /c start $url`
+    else
+        error("Unsupported platform for browser auto-open; visit URL manually: $url")
+    end
+    run(cmd)
+end
+
+oauth = OAuthBuilder("your_client_id") |> build(open_browser)
+cfg   = Config.from_oauth(oauth)
+
+# ── 创建 4 个新 Context ──────────────────────────────────────────────────
+
+fc = FundamentalContext(cfg)
+mc = MarketContext(cfg)
+cc = CalendarContext(cfg)
+pc = PortfolioContext(cfg)
+
+# 注意：这些 Context 都是 HTTP-only，无 WebSocket 连接，
+# 因此**不需要** disconnect!（也不存在该方法）。可以随时创建、随时丢弃。
+
+# ════════════════════════════════════════════════════════════════════════
+# FundamentalContext — 财报、估值、评级、公司信息
+# ════════════════════════════════════════════════════════════════════════
+
+# 分红历史
+display(dividend(fc, "700.HK"))
+
+# 机构评级（并行 fan-out：latest + summary 两个端点）
+display(institution_rating(fc, "AAPL.US"))
+
+# 评级历史明细（按周快照 + 目标价时间序列）
+display(institution_rating_detail(fc, "AAPL.US"))
+
+# P/E、P/B、P/S、股息率快照（含历史 high/low/median）
+display(valuation(fc, "TSLA.US"))
+
+# 行业可比公司估值对比
+display(industry_valuation(fc, "TSLA.US"))
+
+# 公司概况（董事长、网站、员工数、IPO 价等）
+display(company(fc, "AAPL.US"))
+
+# 管理层与董事会
+display(executive(fc, "AAPL.US"))
+
+# 主要股东（含变动追踪）
+display(shareholder(fc, "AAPL.US"))
+
+# 持有该证券的基金/ETF
+display(fund_holder(fc, "AAPL.US"))
+
+# 公司行动（分红、拆股、回购）
+display(corp_action(fc, "AAPL.US"))
+
+# 营收/利润/EPS 一致预期 vs 实际
+display(consensus(fc, "AAPL.US"))
+
+# 分析师 EPS 预测
+display(forecast_eps(fc, "AAPL.US"))
+
+# 回购数据（TTM + 历史 + 比率）
+display(buyback(fc, "AAPL.US"))
+
+# 多维度评级（成长、盈利、估值等子指标）
+display(ratings(fc, "AAPL.US"))
+
+# 完整财报（嵌套结构因 kind 而异，list 字段为原始 JSON）
+display(financial_report(fc, "AAPL.US"; kind=FinancialReportKind.IncomeStatement))
+display(financial_report(fc, "700.HK"; kind=FinancialReportKind.All, period=FinancialReportPeriod.Annual))
+
+# ════════════════════════════════════════════════════════════════════════
+# MarketContext — 市场状态、券商持仓、A/H 溢价、异动
+# ════════════════════════════════════════════════════════════════════════
+
+# 各市场的开收市状态
+display(market_status(mc))
+
+# 净买/净卖前十名券商（按指定回看期）
+display(broker_holding(mc, "700.HK", BrokerHoldingPeriod.Rct1))   # 1日
+display(broker_holding(mc, "700.HK", BrokerHoldingPeriod.Rct60))  # 60日
+
+# 全部券商持仓明细（每个券商的 1/5/20/60 日变化）
+display(broker_holding_detail(mc, "700.HK"))
+
+# 指定券商对某证券的每日持仓历史
+# broker_holding_daily(mc, "700.HK", "6727")  # 6727 = 瑞银 parti_number
+
+# A/H 溢价 K 线（30 天日线）
+display(ah_premium(mc, "700.HK", AhPremiumPeriod.Day, 30))
+display(ah_premium(mc, "700.HK", AhPremiumPeriod.Min5, 60))   # 60 根 5 分钟
+
+# A/H 溢价当日分时
+display(ah_premium_intraday(mc, "700.HK"))
+
+# 买/卖/中性方向成交统计
+display(trade_stats(mc, "700.HK"))
+
+# 市场异动（大宗交易、融资买入等）
+display(anomaly(mc, "HK"))
+
+# 指数成份股（注意：传递指数 symbol，如 HSI.HK）
+display(constituent(mc, "HSI.HK"))
+
+# ════════════════════════════════════════════════════════════════════════
+# CalendarContext — 财务日历
+# ════════════════════════════════════════════════════════════════════════
+
+# 本周财报
+display(finance_calendar(cc, CalendarCategory.Report, Date(2026,5,15), Date(2026,5,22)))
+
+# 本月分红
+display(finance_calendar(cc, CalendarCategory.Dividend, Date(2026,5,1), Date(2026,5,31)))
+
+# 即将上市的 IPO（限定香港市场）
+display(finance_calendar(cc, CalendarCategory.Ipo, Date(2026,5,1), Date(2026,6,30); market="HK"))
+
+# 宏观数据发布
+display(finance_calendar(cc, CalendarCategory.MacroData, Date(2026,5,15), Date(2026,5,22)))
+
+# 休市日
+display(finance_calendar(cc, CalendarCategory.Closed, Date(2026,5,1), Date(2026,12,31); market="US"))
+
+# ════════════════════════════════════════════════════════════════════════
+# PortfolioContext — 汇率、盈亏分析
+# ════════════════════════════════════════════════════════════════════════
+
+# 所有支持币种的汇率快照
+display(exchange_rate(pc))
+
+# 账户总盈亏分析（并行 fan-out：summary + sublist）
+display(profit_analysis(pc))
+
+# 限定时间窗口的盈亏
+display(profit_analysis(pc; start=Date(2026,1,1), end_=Date(2026,5,15)))
+
+# 按市场分页查询
+display(profit_analysis_by_market(pc; page=1, size=20, market="US"))
+
+# 单只证券盈亏明细（正股 / 衍生品分解）
+# display(profit_analysis_detail(pc, "AAPL.US"))
+
+# 单只证券交易流水
+# display(profit_analysis_flows(pc, "AAPL.US"; page=1, size=50, derivative=false))
+
+# ════════════════════════════════════════════════════════════════════════
+# QuoteContext v4.1.0 新增方法（这些走原有 QuoteContext，但内部直接调 HTTP）
+# ════════════════════════════════════════════════════════════════════════
+
+qctx = QuoteContext(cfg)
+try
+    # 美股做空数据（FINRA 双月公布）
+    display(short_positions(qctx, "TSLA.US"))
+
+    # 实时认购/认沽成交量
+    display(option_volume(qctx, "AAPL.US"))
+
+    # 历史日度期权成交统计（最近 30 天）
+    ts_now = Int64(round(datetime2unix(now())))
+    display(option_volume_daily(qctx, "AAPL.US", ts_now, 30))
+
+    # 把自选股置顶（取消置顶用 PinnedMode.Remove）
+    # update_pinned(qctx, PinnedMode.Add, ["700.HK", "AAPL.US"])
+finally
+    disconnect!(qctx)
+end

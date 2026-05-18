@@ -1,8 +1,11 @@
 module Utils
 
     using Logging, Dates, JSON3, DataFrames, EnumX
+    import DecFP: Dec64
 
-    export to_namedtuple, to_china_time, to_dataframe, safeparse, Arc
+    export to_namedtuple, to_china_time, to_dataframe, safeparse, Arc,
+           symbol_to_counter_id, index_symbol_to_counter_id, counter_id_to_symbol,
+           Dec64
 
     # A simple wrapper to mimic Rust's Arc for shared ownership semantics
     struct Arc{T}
@@ -122,6 +125,85 @@ module Utils
 
         # 不支持的类型
         error("safeparse: unsupported type $T")
+    end
+
+    """
+    解析可选的 Decimal 字段。空串、`nothing`、或非数字占位符（如 `"--"`）都返回 `nothing`。
+    LongBridge HTTP API 把 `Option<Decimal>` 序列化为字符串：缺失值常见为 `""` 或 `"--"`。
+    """
+    _parse_optional_decimal(::Nothing) = nothing
+    function _parse_optional_decimal(v::AbstractString)
+        isempty(v) && return nothing
+        # API 偶尔返回 "--" 等占位符表示"无数据"——容错处理
+        try
+            return parse(Dec64, String(v))
+        catch
+            return nothing
+        end
+    end
+    _parse_optional_decimal(v::Number) = Dec64(v)
+
+    # ── Symbol ↔ counter_id 转换 ────────────────────────────────────────
+
+    const _US_ETF_SET = Ref{Union{Nothing, Set{String}}}(nothing)
+    const _US_ETF_LOCK = ReentrantLock()
+
+    function _us_etf_set()
+        s = _US_ETF_SET[]
+        isnothing(s) || return s
+        lock(_US_ETF_LOCK) do
+            s2 = _US_ETF_SET[]
+            isnothing(s2) || return s2
+            path = joinpath(@__DIR__, "us_etf_counter.csv")
+            new_set = Set{String}()
+            for line in eachline(path)
+                t = strip(line)
+                isempty(t) || push!(new_set, String(t))
+            end
+            _US_ETF_SET[] = new_set
+            return new_set
+        end
+    end
+
+    """
+        symbol_to_counter_id(symbol) -> String
+
+    把 LongBridge symbol（如 `"TSLA.US"`）转成内部 counter_id（如 `"ST/US/TSLA"`）。
+    美股 ETF 通过内置 ETF 列表识别，输出 `"ETF/US/..."`。
+    """
+    function symbol_to_counter_id(symbol::AbstractString)
+        s = String(symbol)
+        idx = findlast('.', s)
+        isnothing(idx) && return s
+        code   = SubString(s, 1, prevind(s, idx))
+        market = uppercase(SubString(s, nextind(s, idx)))
+        etf_candidate = string("ETF/", market, "/", code)
+        return etf_candidate ∈ _us_etf_set() ? etf_candidate : string("ST/", market, "/", code)
+    end
+
+    """
+        index_symbol_to_counter_id(symbol) -> String
+
+    把指数 symbol（如 `"HSI.HK"`）转成 counter_id（如 `"IX/HK/HSI"`）。
+    """
+    function index_symbol_to_counter_id(symbol::AbstractString)
+        s = String(symbol)
+        idx = findlast('.', s)
+        isnothing(idx) && return s
+        code   = SubString(s, 1, prevind(s, idx))
+        market = uppercase(SubString(s, nextind(s, idx)))
+        return string("IX/", market, "/", code)
+    end
+
+    """
+        counter_id_to_symbol(counter_id) -> String
+
+    把 counter_id（如 `"ST/US/TSLA"`）转回 symbol（如 `"TSLA.US"`）。
+    """
+    function counter_id_to_symbol(counter_id::AbstractString)
+        s = String(counter_id)
+        parts = split(s, '/'; limit=3)
+        length(parts) == 3 ? string(parts[3], '.', parts[2]) : s
     end
 
 end

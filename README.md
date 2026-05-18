@@ -290,6 +290,73 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Trade.subscribe(ctx, topics::Vector{TopicType.T})`: Subscribe to trade pushes (e.g. `[TopicType.Private]`)
 - `Trade.unsubscribe(ctx, topics::Vector{TopicType.T})`: Unsubscribe from trade pushes
 
+### Fundamental Data (`FundamentalContext`, new in v0.6.0)
+- `FundamentalContext(config)`: Create context (HTTP-only, no disconnect needed)
+- `financial_report(ctx, symbol; kind, period)`: Full financial statements (IS/BS/CF/All)
+- `institution_rating(ctx, symbol)`: Analyst ratings (latest + summary, parallel fan-out)
+- `institution_rating_detail(ctx, symbol)`: Historical rating distribution
+- `dividend(ctx, symbol)` / `dividend_detail(ctx, symbol)`: Dividend history / details
+- `forecast_eps(ctx, symbol)`: Analyst EPS forecasts
+- `consensus(ctx, symbol)`: Revenue / profit / EPS consensus vs actual
+- `valuation(ctx, symbol)` / `valuation_history(ctx, symbol)`: PE/PB/PS/dividend yield
+- `industry_valuation(ctx, symbol)` / `industry_valuation_dist(ctx, symbol)`: Peer comparison
+- `company(ctx, symbol)` / `executive(ctx, symbol)` / `shareholder(ctx, symbol)` / `fund_holder(ctx, symbol)`
+- `corp_action(ctx, symbol)`: Corporate actions (dividends, splits, buybacks)
+- `invest_relation(ctx, symbol)`, `operating(ctx, symbol)`, `buyback(ctx, symbol)`, `ratings(ctx, symbol)`
+
+### Market Data (`MarketContext`, new in v0.6.0)
+- `market_status(ctx)`: Market open/close status across regions
+- `broker_holding(ctx, symbol, period)` / `broker_holding_detail(ctx, symbol)` / `broker_holding_daily(ctx, symbol, broker_id)`
+- `ah_premium(ctx, symbol, period, count)` / `ah_premium_intraday(ctx, symbol)`: A/H premium klines & intraday
+- `trade_stats(ctx, symbol)`: Buy/sell/neutral trade statistics
+- `anomaly(ctx, market)`: Market anomaly events
+- `constituent(ctx, symbol)`: Index constituents (e.g. `"HSI.HK"`)
+
+### Calendar (`CalendarContext`, new in v0.6.0)
+- `finance_calendar(ctx, category, start, end_; market)`: Financial calendar events
+  - `CalendarCategory`: `Report` / `Dividend` / `Split` / `Ipo` / `MacroData` / `Closed` / `Meeting` / `Merge`
+
+### Portfolio Analytics (`PortfolioContext`, new in v0.6.0)
+- `exchange_rate(ctx)`: Current rates for all supported currencies
+- `profit_analysis(ctx; start, end_)`: Account P&L (summary + sublist parallel fan-out)
+- `profit_analysis_by_market(ctx; page, size, market, ...)`: Paginated by market
+- `profit_analysis_detail(ctx, symbol; ...)`: Per-security P&L breakdown
+- `profit_analysis_flows(ctx, symbol; page, size, derivative, ...)`: Per-security flows
+
+### Price Alerts (`AlertContext`, new in v0.6.0)
+- `list_alerts(ctx)`: List all alerts grouped by security
+- `add_alert(ctx, symbol, condition, trigger_value, frequency)`: Add alert
+  - `AlertCondition`: `PriceRise` / `PriceFall` / `PercentRise` / `PercentFall`
+  - `AlertFrequency`: `Daily` / `EveryTime` / `Once`
+- `update_alert(ctx, item::AlertItem)`: Update alert (toggle enabled etc.)
+- `delete_alerts(ctx, ids::Vector{String})`: Delete alerts
+
+### Community Sharelists (`SharelistContext`, new in v0.6.0)
+- `list_sharelists(ctx; count)` / `popular_sharelists(ctx; count)` / `sharelist_detail(ctx, id)`
+- `create_sharelist(ctx, name; description)` / `delete_sharelist(ctx, id)`
+- `add_sharelist_securities(ctx, id, symbols)` / `remove_sharelist_securities(ctx, id, symbols)` / `sort_sharelist_securities(ctx, id, symbols)`
+
+### DCA Plans (`DCAContext`, new in v0.6.0)
+- `list_dca(ctx; status, symbol)` / `dca_stats(ctx; symbol)`
+- `create_dca(ctx, symbol, amount, frequency; day_of_week, day_of_month, allow_margin)`
+  - `DCAFrequency`: `Daily` / `Weekly` / `Fortnightly` / `Monthly`
+  - `DCAStatus`: `Active` / `Suspended` / `Finished`
+- `update_dca(ctx, plan_id; amount, frequency, ...)`
+- `pause_dca(ctx, plan_id)` / `resume_dca(ctx, plan_id)` / `stop_dca(ctx, plan_id)`
+- `dca_history(ctx, plan_id; page, limit)` / `dca_check_support(ctx, symbols)` / `dca_calc_date(ctx, symbol, frequency; ...)` / `dca_set_reminder(ctx, hours)`
+
+### Community Content (`ContentContext`, new in v0.6.0)
+- `news(ctx, symbol)`: News for a security
+- `topics_by_symbol(ctx, symbol)` / `topic_detail(ctx, id)` / `topic_replies(ctx, topic_id; page, size)`
+- `my_topics(ctx; page, size, topic_type)`: List topics you've published
+- `create_topic(ctx, title, body; topic_type, tickers, hashtags)`: Publish a topic, returns ID
+- `create_topic_reply(ctx, topic_id, body; reply_to_id)`: Post a reply (plain text)
+
+### Quote Additions (v0.6.0)
+- `short_positions(ctx, symbol)`: US short interest (FINRA bi-monthly)
+- `option_volume(ctx, symbol)` / `option_volume_daily(ctx, symbol, timestamp, count)`: Option volume stats
+- `update_pinned(ctx, mode::PinnedMode.T, symbols)`: Pin/unpin watchlist securities
+
 ## License
 
 MIT License

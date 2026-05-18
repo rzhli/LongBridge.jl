@@ -2,6 +2,55 @@
 
 # Release Notes
 
+## v0.6.0 (2026-05-18)
+
+### New Features — 移植上游 LongPort SDK v4.1.0 的 9 个新 Context（共 70 个新方法、~5,100 行）
+
+P0（HTTP-only 只读分析，4 个 Context + QuoteContext 扩展）：
+
+- **`FundamentalContext`** — 20 个方法：财报、分析师评级、股息、EPS 预测、一致预期、估值、行业对比、公司概况、高管、股东、基金持仓、公司行动、回购、多维度评级
+- **`MarketContext`** — 9 个方法：市场状态、券商持仓（top/明细/日度）、A/H 溢价（K 线/分时）、成交统计、异动、指数成份股
+- **`CalendarContext`** — `finance_calendar` 支持 8 种事件类别（财报/分红/拆股/IPO/宏观/休市/会议/合并）
+- **`PortfolioContext`** — 5 个方法：汇率、盈亏分析（总览 + 按市场 + 单只明细 + 流水）
+- **`QuoteContext`** — 4 个新方法：`short_positions`、`option_volume`、`option_volume_daily`、`update_pinned`
+
+P1（社区/计划管理，4 个 Context）：
+
+- **`AlertContext`** — 4 个方法：价格提醒 CRUD（`list_alerts`/`add_alert`/`update_alert`/`delete_alerts`）
+- **`SharelistContext`** — 8 个方法：社区自选股列表（`list_sharelists`/`sharelist_detail`/`popular_sharelists`/`create_sharelist`/`delete_sharelist`/`add_sharelist_securities`/`remove_sharelist_securities`/`sort_sharelist_securities`）
+- **`DCAContext`** — 12 个方法：定投全生命周期（`list_dca`/`create_dca`/`update_dca`/`pause_dca`/`resume_dca`/`stop_dca`/`dca_history`/`dca_stats`/`dca_check_support`/`dca_calc_date`/`dca_set_reminder`）
+- **`ContentContext`** — 7 个方法：社区话题与资讯（`my_topics`/`create_topic`/`topics_by_symbol`/`topic_detail`/`topic_replies`/`create_topic_reply`/`news`）
+
+### Architecture
+
+- **HTTP-only Context 不用 actor pattern** — 新 Context 都是简单的 `struct X; config::Settings; end`，直接调 `Client.http_get/post/put/delete`。`institution_rating` / `profit_analysis` 用 `Threads.@spawn` 真并行 fan-out 调用两个端点。
+- **typed enums via `EnumX.@enumx`** — 所有 API 参数都是类型安全的（`FinancialReportKind`、`CalendarCategory`、`AlertCondition`、`DCAFrequency` 等共 14 个新枚举）。
+- **`DecFP.Dec64` 用于货币/价格/比率字段** — 匹配上游 `rust_decimal::Decimal`，避免 Float64 在分红/盈亏计算的精度问题。`_parse_optional_decimal` 对 `""`、`null`、`"--"` 等占位符统一返回 `nothing`。
+- **`MarketCtx/` 文件夹（类型名仍叫 `MarketContext`）** — 避免与 `Constant.Market` 枚举命名冲突。
+- **`Client.http_delete` 支持 body** — Alert/Sharelist 的 DELETE 接口需要 JSON body。
+- **方法命名加前缀避免顶层冲突** — `list_alerts`/`list_sharelists`/`list_dca` 等（Rust 用方法绑定可全叫 `list`，Julia 顶层导出需要消歧）。
+
+### New Utilities (`Core/Utils.jl`)
+
+- `Dec64` 重导出（无需 `using DecFP`）
+- `symbol_to_counter_id("TSLA.US") → "ST/US/TSLA"`（含 4574 行嵌入式美股 ETF 表，懒加载）
+- `index_symbol_to_counter_id("HSI.HK") → "IX/HK/HSI"`
+- `counter_id_to_symbol("ST/HK/700") → "700.HK"`
+- `_parse_optional_decimal` 容错占位符
+
+### Dependencies
+
+- 新增 `DecFP = "1"`
+
+### Tests
+
+- 烟测覆盖 240 项：构造、JSON 反序列化、枚举映射、占位符容错；联机端到端测试通过 `examples/p0_analytics.jl` 与 `examples/p1_community.jl` 手验。
+
+### Examples
+
+- 新增 `examples/p0_analytics.jl` — 4 个新 Context 的全部代表性调用
+- 新增 `examples/p1_community.jl` — 价格提醒 / 自选股 / 定投 / 社区 的全套用法（写操作默认注释掉）
+
 ## v0.5.2 (2026-05-03)
 
 ### Bug fixes

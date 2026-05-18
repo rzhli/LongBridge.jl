@@ -290,6 +290,101 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Trade.subscribe(ctx, topics::Vector{TopicType.T})`: 订阅交易推送（如 `[TopicType.Private]`）
 - `Trade.unsubscribe(ctx, topics::Vector{TopicType.T})`: 取消订阅交易推送
 
+### 基本面（FundamentalContext，v0.6.0 新增）
+- `FundamentalContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
+- `financial_report(ctx, symbol; kind, period)`: 完整财报（利润表/资产负债表/现金流量表）
+- `institution_rating(ctx, symbol)`: 分析师评级（latest + summary，并行 fan-out）
+- `institution_rating_detail(ctx, symbol)`: 评级历史明细
+- `dividend(ctx, symbol)` / `dividend_detail(ctx, symbol)`: 分红历史 / 详细分配方案
+- `forecast_eps(ctx, symbol)`: 分析师 EPS 预测
+- `consensus(ctx, symbol)`: 营收/利润/EPS 一致预期 vs 实际
+- `valuation(ctx, symbol)` / `valuation_history(ctx, symbol)`: P/E/P/B/P/S/股息率
+- `industry_valuation(ctx, symbol)` / `industry_valuation_dist(ctx, symbol)`: 同业对比 / 行业分布
+- `company(ctx, symbol)`: 公司概况
+- `executive(ctx, symbol)`: 管理层与董事会
+- `shareholder(ctx, symbol)`: 主要股东
+- `fund_holder(ctx, symbol)`: 持有该证券的基金/ETF
+- `corp_action(ctx, symbol)`: 公司行动（分红、拆股、回购）
+- `invest_relation(ctx, symbol)`: 对外投资关系
+- `operating(ctx, symbol)`: 经营报告与关键指标
+- `buyback(ctx, symbol)`: 回购数据
+- `ratings(ctx, symbol)`: 多维度评级
+
+### 市场数据（MarketContext，v0.6.0 新增）
+- `MarketContext(config)`: 创建上下文
+- `market_status(ctx)`: 各市场开/收市状态
+- `broker_holding(ctx, symbol, period)`: 净买/净卖前十券商
+- `broker_holding_detail(ctx, symbol)`: 全部券商持仓明细
+- `broker_holding_daily(ctx, symbol, broker_id)`: 指定券商日度持仓
+- `ah_premium(ctx, symbol, period, count)`: A/H 溢价 K 线
+- `ah_premium_intraday(ctx, symbol)`: A/H 溢价分时
+- `trade_stats(ctx, symbol)`: 买/卖/中性方向成交统计
+- `anomaly(ctx, market)`: 市场异动
+- `constituent(ctx, symbol)`: 指数成份股（symbol 传指数如 `"HSI.HK"`）
+
+### 财务日历（CalendarContext，v0.6.0 新增）
+- `CalendarContext(config)`: 创建上下文
+- `finance_calendar(ctx, category, start, end_; market)`: 财务日历事件
+  - `CalendarCategory`: `Report` / `Dividend` / `Split` / `Ipo` / `MacroData` / `Closed` / `Meeting` / `Merge`
+
+### 组合分析（PortfolioContext，v0.6.0 新增）
+- `PortfolioContext(config)`: 创建上下文
+- `exchange_rate(ctx)`: 全部支持币种的汇率
+- `profit_analysis(ctx; start, end_)`: 账户总盈亏（summary + sublist 并行 fan-out）
+- `profit_analysis_by_market(ctx; page, size, market, ...)`: 按市场分页盈亏
+- `profit_analysis_detail(ctx, symbol; start, end_)`: 单只证券盈亏明细
+- `profit_analysis_flows(ctx, symbol; page, size, derivative, ...)`: 单只证券交易流水
+
+### 价格提醒（AlertContext，v0.6.0 新增）
+- `AlertContext(config)`: 创建上下文
+- `list_alerts(ctx)`: 查询全部提醒（按证券分组）
+- `add_alert(ctx, symbol, condition, trigger_value, frequency)`: 新增提醒
+  - `AlertCondition`: `PriceRise` / `PriceFall` / `PercentRise` / `PercentFall`
+  - `AlertFrequency`: `Daily` / `EveryTime` / `Once`
+- `update_alert(ctx, item::AlertItem)`: 更新提醒
+- `delete_alerts(ctx, ids::Vector{String})`: 删除提醒
+
+### 社区自选股（SharelistContext，v0.6.0 新增）
+- `SharelistContext(config)`: 创建上下文
+- `list_sharelists(ctx; count)`: 我自己 + 已订阅的自选股列表
+- `popular_sharelists(ctx; count)`: 热门列表
+- `sharelist_detail(ctx, id)`: 列表详情（含成份股）
+- `create_sharelist(ctx, name; description)`: 新建列表
+- `delete_sharelist(ctx, id)`: 删除列表
+- `add_sharelist_securities(ctx, id, symbols)`: 加入证券
+- `remove_sharelist_securities(ctx, id, symbols)`: 移除证券
+- `sort_sharelist_securities(ctx, id, symbols)`: 重排证券
+
+### 定投计划（DCAContext，v0.6.0 新增）
+- `DCAContext(config)`: 创建上下文
+- `list_dca(ctx; status, symbol)`: 全部定投计划，可按状态/标的过滤
+- `create_dca(ctx, symbol, amount, frequency; day_of_week, day_of_month, allow_margin)`: 新建
+  - `DCAFrequency`: `Daily` / `Weekly` / `Fortnightly` / `Monthly`
+  - `DCAStatus`: `Active` / `Suspended` / `Finished`
+- `update_dca(ctx, plan_id; amount, frequency, ...)`: 更新（只传想改的字段）
+- `pause_dca(ctx, plan_id)` / `resume_dca(ctx, plan_id)` / `stop_dca(ctx, plan_id)`: 暂停/恢复/永久停止
+- `dca_history(ctx, plan_id; page, limit)`: 计划执行历史
+- `dca_stats(ctx; symbol)`: 总览统计
+- `dca_check_support(ctx, symbols)`: 批量检查标的是否支持
+- `dca_calc_date(ctx, symbol, frequency; day_of_week, day_of_month)`: 计算下次交易日
+- `dca_set_reminder(ctx, hours)`: 设置执行前提醒小时数（`"1"`/`"6"`/`"12"`）
+
+### 社区话题与资讯（ContentContext，v0.6.0 新增）
+- `ContentContext(config)`: 创建上下文
+- `news(ctx, symbol)`: 某证券的资讯列表
+- `topics_by_symbol(ctx, symbol)`: 某证券下的话题
+- `my_topics(ctx; page, size, topic_type)`: 我自己发布的话题
+- `topic_detail(ctx, id)`: 话题详情
+- `topic_replies(ctx, topic_id; page, size)`: 话题评论
+- `create_topic(ctx, title, body; topic_type, tickers, hashtags)`: 发布新话题，返回 ID
+- `create_topic_reply(ctx, topic_id, body; reply_to_id)`: 评论（plain text，提到的 symbol 自动识别）
+
+### 行情（QuoteContext，v0.6.0 新增 4 个方法）
+- `short_positions(ctx, symbol)`: 美股做空数据（FINRA 双月公布）
+- `option_volume(ctx, symbol)`: 实时期权认购/认沽成交量
+- `option_volume_daily(ctx, symbol, timestamp, count)`: 历史日度期权统计
+- `update_pinned(ctx, mode::PinnedMode.T, symbols)`: 自选股置顶/取消置顶
+
 ## 许可证
 
 MIT License

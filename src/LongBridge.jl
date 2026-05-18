@@ -18,6 +18,14 @@ module LongBridge
     include("Core/ControlProtocol.jl")
     include("Core/QuoteProtocol.jl")
     include("Core/TradeProtocol.jl")
+    include("Core/CalendarProtocol.jl")
+    include("Core/PortfolioProtocol.jl")
+    include("Core/MarketProtocol.jl")
+    include("Core/FundamentalProtocol.jl")
+    include("Core/AlertProtocol.jl")
+    include("Core/SharelistProtocol.jl")
+    include("Core/DCAProtocol.jl")
+    include("Core/ContentProtocol.jl")
     include("OAuth.jl")
     include("Config.jl")
     include("Client.jl")
@@ -26,11 +34,27 @@ module LongBridge
     include("Quote/Quote.jl")
     include("Trade/TradePush.jl")
     include("Trade/Trade.jl")
+    include("Calendar/Calendar.jl")
+    include("Portfolio/Portfolio.jl")
+    include("MarketCtx/MarketCtx.jl")
+    include("Fundamental/Fundamental.jl")
+    include("Alert/Alert.jl")
+    include("Sharelist/Sharelist.jl")
+    include("DCA/DCA.jl")
+    include("Content/Content.jl")
 
     using .Constant: Market, Currency
     using .ControlProtocol
     using .QuoteProtocol
     using .TradeProtocol
+    using .CalendarProtocol
+    using .PortfolioProtocol
+    using .MarketProtocol
+    using .FundamentalProtocol
+    using .AlertProtocol
+    using .SharelistProtocol
+    using .DCAProtocol
+    using .ContentProtocol
     using .Commands
     using .Cache
     using .OAuth
@@ -41,6 +65,14 @@ module LongBridge
     using .Trade
     using .QuotePush
     using .Quote
+    using .Calendar
+    using .Portfolio
+    using .MarketCtx
+    using .Fundamental
+    using .Alert
+    using .Sharelist
+    using .DCA
+    using .Content
 
     #= ==================== Exports ==================== =#
 
@@ -94,6 +126,11 @@ module LongBridge
     export market_temperature, history_market_temperature
     # 自选股
     export watchlist, create_watchlist_group, delete_watchlist_group, update_watchlist_group
+    # v4.1.0 新增
+    export short_positions, option_volume, option_volume_daily, update_pinned
+    export ShortPosition, ShortPositionsResponse,
+           OptionVolumeStats, OptionVolumeDailyStat, OptionVolumeDaily,
+           PinnedMode
 
     # --- TradeProtocol (交易协议) ---
     # Options 结构体
@@ -114,6 +151,104 @@ module LongBridge
            margin_ratio, estimate_max_purchase_quantity
     # 推送
     export set_on_order_changed
+
+    # --- Calendar (财务日历) ---
+    export CalendarContext, finance_calendar
+    export CalendarCategory
+    export CalendarDataKv, CalendarEventInfo, CalendarDateGroup, CalendarEventsResponse
+
+    # --- Portfolio (组合分析) ---
+    export PortfolioContext,
+           exchange_rate, profit_analysis, profit_analysis_by_market,
+           profit_analysis_detail, profit_analysis_flows
+    export FlowDirection, AssetType
+    export ExchangeRate, ExchangeRates,
+           ProfitSummaryInfo, ProfitSummaryBreakdown, ProfitAnalysisSummary,
+           ProfitAnalysisItem, ProfitAnalysisSublist, ProfitAnalysis,
+           ProfitAnalysisByMarketItem, ProfitAnalysisByMarket,
+           ProfitDetailEntry, ProfitDetails, ProfitAnalysisDetail,
+           FlowItem, ProfitAnalysisFlows
+
+    # --- Market (市场数据) ---
+    export MarketContext,
+           market_status, broker_holding, broker_holding_detail, broker_holding_daily,
+           ah_premium, ah_premium_intraday, trade_stats, anomaly, constituent
+    export BrokerHoldingPeriod, AhPremiumPeriod
+    export MarketTimeItem, MarketStatusResponse,
+           BrokerHoldingEntry, BrokerHoldingTop,
+           BrokerHoldingChanges, BrokerHoldingDetailItem, BrokerHoldingDetail,
+           BrokerHoldingDailyItem, BrokerHoldingDailyHistory,
+           AhPremiumKline, AhPremiumKlines, AhPremiumIntraday,
+           TradeStatistics, TradePriceLevel, TradeStatsResponse,
+           AnomalyItem, AnomalyResponse,
+           ConstituentStock, IndexConstituents
+
+    # --- Fundamental (基本面) ---
+    export FundamentalContext,
+           financial_report, institution_rating, institution_rating_detail,
+           dividend, dividend_detail, forecast_eps, consensus,
+           valuation, valuation_history, industry_valuation, industry_valuation_dist,
+           company, executive, shareholder, fund_holder,
+           corp_action, invest_relation, operating, buyback, ratings
+    export FinancialReportKind, FinancialReportPeriod, InstitutionRecommend
+    export FinancialReports,
+           RatingEvaluate, RatingTarget, RatingSummaryEvaluate,
+           InstitutionRatingLatest, InstitutionRatingSummary, InstitutionRating,
+           InstitutionRatingDetailEvaluateItem, InstitutionRatingDetailEvaluate,
+           InstitutionRatingDetailTargetItem, InstitutionRatingDetailTarget,
+           InstitutionRatingDetail,
+           DividendItem, DividendList,
+           ForecastEpsItem, ForecastEps,
+           ConsensusDetail, ConsensusReport, FinancialConsensus,
+           ValuationPoint, ValuationMetricData, ValuationMetricsData, ValuationData,
+           ValuationHistoryMetric, ValuationHistoryMetrics, ValuationHistoryData, ValuationHistoryResponse,
+           IndustryValuationHistory, IndustryValuationItem, IndustryValuationList,
+           ValuationDist, IndustryValuationDist,
+           CompanyOverview,
+           Professional, ExecutiveGroup, ExecutiveList,
+           ShareholderStock, Shareholder, ShareholderList,
+           FundHolder, FundHolders,
+           CorpActionLive, CorpActionItem, CorpActions,
+           InvestSecurity, InvestRelations,
+           OperatingIndicator, OperatingFinancial, OperatingItem, OperatingList,
+           RecentBuybacks, BuybackHistoryItem, BuybackRatios, BuybackData,
+           RatingLeafIndicator, RatingIndicator, RatingSubIndicatorGroup, RatingCategory, StockRatings
+
+    # --- Alert (价格提醒) ---
+    export AlertContext,
+           list_alerts, add_alert, update_alert, delete_alerts
+    export AlertCondition, AlertFrequency
+    export AlertItem, AlertSymbolGroup, AlertList
+
+    # --- Sharelist (社区自选股) ---
+    export SharelistContext,
+           list_sharelists, sharelist_detail, popular_sharelists,
+           create_sharelist, delete_sharelist,
+           add_sharelist_securities, remove_sharelist_securities,
+           sort_sharelist_securities
+    export SharelistStock, SharelistInfo, SharelistList,
+           SharelistScopes, SharelistDetail
+
+    # --- DCA (定投计划) ---
+    export DCAContext,
+           list_dca, create_dca, update_dca,
+           pause_dca, resume_dca, stop_dca,
+           dca_history, dca_stats, dca_check_support,
+           dca_calc_date, dca_set_reminder
+    export DCAFrequency, DCAStatus
+    export DcaPlan, DcaList, DcaStats,
+           DcaSupportInfo, DcaSupportList,
+           DcaHistoryRecord, DcaHistoryResponse,
+           DcaCreateResult, DcaCalcDateResult
+
+    # --- Content (社区话题与资讯) ---
+    export ContentContext,
+           my_topics, create_topic, topics_by_symbol, topic_detail,
+           topic_replies, create_topic_reply, news
+    export TopicAuthor, TopicImage,
+           OwnedTopic, TopicItem, TopicReply, NewsItem,
+           MyTopicsOptions, CreateTopicOptions,
+           ListTopicRepliesOptions, CreateReplyOptions
 
     # ==================== Precompile workload ====================
     # Force compilation of the most-used construction paths so a fresh REPL

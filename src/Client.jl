@@ -132,9 +132,14 @@ function _http_request(config::Config.Settings, method::String, path::String;
             end
         end
 
-        if method in ("GET", "DELETE")
-            http_fn = method == "GET" ? HTTP.get : HTTP.delete
-            return http_fn(full_url; headers, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
+        if method == "GET"
+            return HTTP.get(full_url; headers, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
+        elseif method == "DELETE"
+            # DELETE 可带 body（Alert/Sharelist 等接口需要）
+            kw = isnothing(body) ?
+                (; headers, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES) :
+                (; headers, body=body_str, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
+            return HTTP.delete(full_url; kw...)
         else
             http_fn = method == "POST" ? HTTP.post : HTTP.put
             return http_fn(full_url; headers, body=body_str, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
@@ -154,8 +159,10 @@ http_post(config::Config.Settings, path::String; body::Dict=Dict()) =
 http_put(config::Config.Settings, path::String; body::Dict=Dict()) =
     _http_request(config, "PUT", path; body)
 
-http_delete(config::Config.Settings, path::String; params::Dict{String,Any}=Dict{String,Any}()) =
-    _http_request(config, "DELETE", path; params)
+http_delete(config::Config.Settings, path::String;
+            params::Dict{String,Any}=Dict{String,Any}(),
+            body::Union{Dict,Nothing}=nothing) =
+    _http_request(config, "DELETE", path; params, body)
 
 """
 refresh_token(config::Config.Settings, expired_at::String) -> Dict
