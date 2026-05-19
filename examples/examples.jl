@@ -32,8 +32,14 @@ ctx = QuoteContext(cfg)
 ### 获取标的基础信息 （DataFrame） 后面三个的 board = ""
 @time resp = static_info(ctx, ["700.HK", "AAPL.US", "TSLA.US", "NFLX.US"])
 
-### 获取股票实时行情 （DataFrame） （over_night_quote需开通美股LV1实时行情）
-@time quotes = realtime_quote(ctx, ["GOOGL.US", "AAPL.US", "TSLA.US", "NFLX.US"])
+### 获取股票实时行情快照 （DataFrame） （over_night_quote需开通美股LV1实时行情）
+@time quotes = quote_snapshot(ctx, ["GOOGL.US", "AAPL.US", "TSLA.US", "NFLX.US"])
+
+### 行情账号信息（连接时由 QueryUserQuoteProfile 自动拉取）
+@info "Quote profile" member_id(ctx) quote_level(ctx) length(quote_package_details(ctx))
+
+### 公司公告 (Vector{FilingItem})
+@time filings_data = filings(ctx, "AAPL.US")
 
 ### 获取期权实时行情 （需开通OPRA美股期权行情）
 @time resp = option_quote(ctx, ["AAPL230317P160000.US"])
@@ -174,6 +180,13 @@ end
 
 ### 订阅行情数据  实时价格推送，实时盘口推送
 @time Quote.subscribe(ctx, ["700.HK"], [SubType.QUOTE, SubType.DEPTH]; is_first_push=true)
+
+### 从本地缓存读取最新推送的行情（订阅后才有数据，v0.7.0 起 realtime_quote 改读缓存）
+sleep(1)
+q = realtime_quote(ctx, "700.HK")          # Union{Nothing, PushQuote}
+isnothing(q) || @info "cached" q.last_done q.volume q.timestamp
+realtime_quote(ctx, ["700.HK", "AAPL.US"]) # Vector，每个元素同上
+
 ### 取消订阅
 Quote.unsubscribe(ctx, ["700.HK"], [SubType.QUOTE, SubType.DEPTH])
 
@@ -415,5 +428,20 @@ resp = Trade.unsubscribe(ctx, [TopicType.Private])
 
 ### 获取保证金比例, 用于获取股票初始保证金比例、维持保证金比例、强平保证金比例
 @time resp = margin_ratio(ctx, "700.HK")
+
+
+## 结算单 (AssetContext, v0.7.0 新增；无 WebSocket 连接，无需 disconnect)
+
+asset_ctx = AssetContext(cfg)
+
+### 月度结算单列表（page=1 每页 20 条）
+@time sl = statements(asset_ctx, StatementType.Monthly; page=1, page_size=20)
+
+### 用 file_key 换下载链接（链接短期有效）
+if !isempty(sl.list)
+    @time url = statement_download_url(asset_ctx, sl.list[1].file_key)
+    println(url.url)
+end
+
 
 disconnect!(ctx)

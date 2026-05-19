@@ -26,6 +26,7 @@ module LongBridge
     include("Core/SharelistProtocol.jl")
     include("Core/DCAProtocol.jl")
     include("Core/ContentProtocol.jl")
+    include("Core/AssetProtocol.jl")
     include("OAuth.jl")
     include("Config.jl")
     include("Client.jl")
@@ -42,6 +43,7 @@ module LongBridge
     include("Sharelist/Sharelist.jl")
     include("DCA/DCA.jl")
     include("Content/Content.jl")
+    include("Asset/Asset.jl")
 
     using .Constant: Market, Currency
     using .ControlProtocol
@@ -55,6 +57,7 @@ module LongBridge
     using .SharelistProtocol
     using .DCAProtocol
     using .ContentProtocol
+    using .AssetProtocol
     using .Commands
     using .Cache
     using .OAuth
@@ -73,6 +76,7 @@ module LongBridge
     using .Sharelist
     using .DCA
     using .Content
+    using .Asset
 
     #= ==================== Exports ==================== =#
 
@@ -106,7 +110,7 @@ module LongBridge
     export subscribe, unsubscribe, subscriptions,
            set_on_quote, set_on_depth, set_on_brokers, set_on_trades, set_on_candlestick
     # 实时行情
-    export realtime_quote, static_info, depth, brokers, trades, intraday
+    export realtime_quote, quote_snapshot, static_info, depth, brokers, trades, intraday
     # 实时数据访问 (从本地缓存)
     export realtime_depth, realtime_brokers, realtime_trades, realtime_candlesticks
     # K线数据
@@ -119,7 +123,8 @@ module LongBridge
     # 窝轮
     export warrant_quote, warrant_list, warrant_issuers, warrant_filter
     # 市场信息
-    export trading_session, trading_days, participants, member_id, quote_level, security_list
+    export trading_session, trading_days, participants, member_id, quote_level,
+           quote_package_details, filings, security_list
     # 资金流
     export capital_flow, capital_distribution, calc_indexes
     # 市场温度
@@ -130,7 +135,7 @@ module LongBridge
     export short_positions, option_volume, option_volume_daily, update_pinned
     export ShortPosition, ShortPositionsResponse,
            OptionVolumeStats, OptionVolumeDailyStat, OptionVolumeDaily,
-           PinnedMode
+           PinnedMode, FilingItem, QuotePackageDetail
 
     # --- TradeProtocol (交易协议) ---
     # Options 结构体
@@ -249,6 +254,11 @@ module LongBridge
            OwnedTopic, TopicItem, TopicReply, NewsItem,
            MyTopicsOptions, CreateTopicOptions,
            ListTopicRepliesOptions, CreateReplyOptions
+
+    # --- Asset (账户结算单) ---
+    export AssetContext, statements, statement_download_url
+    export StatementType
+    export StatementItem, GetStatementListResponse, GetStatementResponse
 
     # ==================== Precompile workload ====================
     # Force compilation of the most-used construction paths so a fresh REPL

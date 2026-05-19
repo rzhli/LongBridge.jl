@@ -3012,5 +3012,135 @@ module QuoteProtocol
         return HistoryMarketTemperatureResponse(list, type)
     end
 
-   
+    # ── UserQuoteProfile (cmd 4) ────────────────────────────────────────
+    # api.proto:
+    #   message UserQuoteProfileRequest  { string language = 1; }
+    #   message UserQuoteProfileResponse { int64 member_id = 1; string quote_level = 2;
+    #     int32 subscribe_limit = 3; int32 history_candlestick_limit = 4;
+    #     repeated RateLimit rate_limit = 5; UserQuoteLevelDetail quote_level_detail = 6; }
+    #   message UserQuoteLevelDetail {
+    #     message PackageDetail { string key=1; name=2; description=4; int64 start=5; end=6; }
+    #     map<string, PackageDetail> by_package_key = 1;
+    #     map<string, MarketPackageDetail> by_market_code = 2;
+    #   }
+
+    export QuotePackageDetail, UserQuoteProfileRequest, UserQuoteProfileResponse
+
+    struct UserQuoteProfileRequest
+        language::String
+    end
+    default_values(::Type{UserQuoteProfileRequest}) = (;language = "")
+    field_numbers(::Type{UserQuoteProfileRequest}) = (;language = 1)
+
+    function encode(e::ProtoBuf.AbstractProtoEncoder, x::UserQuoteProfileRequest)
+        initpos = position(e.io)
+        !isempty(x.language) && encode(e, 1, x.language)
+        return position(e.io) - initpos
+    end
+    function _encoded_size(x::UserQuoteProfileRequest)
+        sz = 0
+        !isempty(x.language) && (sz += _encoded_size(x.language, 1))
+        return sz
+    end
+
+    struct QuotePackageDetail
+        key::String
+        name::String
+        description::String
+        start_at::DateTime           # converted from unix seconds
+        end_at::DateTime
+    end
+
+    # decode a PackageDetail submessage (no `end` field name; field number 6)
+    function _decode_package_detail(d::ProtoBuf.AbstractProtoDecoder)
+        key = ""; name = ""; description = ""
+        start_s = zero(Int64); end_s = zero(Int64)
+        while !message_done(d)
+            field_number, wire_type = decode_tag(d)
+            if field_number == 1
+                key = decode(d, String)
+            elseif field_number == 2
+                name = decode(d, String)
+            elseif field_number == 4
+                description = decode(d, String)
+            elseif field_number == 5
+                start_s = decode(d, Int64)
+            elseif field_number == 6
+                end_s = decode(d, Int64)
+            else
+                skip(d, wire_type)
+            end
+        end
+        QuotePackageDetail(key, name, description, unix2datetime(start_s), unix2datetime(end_s))
+    end
+
+    # decode a proto map<string, PackageDetail> entry: { key=1 (string), value=2 (msg) }
+    function _decode_package_map_entry(d::ProtoBuf.AbstractProtoDecoder)
+        _ignored_key = ""
+        pkg::Union{Nothing,QuotePackageDetail} = nothing
+        while !message_done(d)
+            field_number, wire_type = decode_tag(d)
+            if field_number == 1
+                _ignored_key = decode(d, String)
+            elseif field_number == 2
+                len = decode(d, UInt64)
+                sub_d = ProtoDecoder(IOBuffer(read(d.io, len)))
+                pkg = _decode_package_detail(sub_d)
+            else
+                skip(d, wire_type)
+            end
+        end
+        pkg
+    end
+
+    # decode UserQuoteLevelDetail submessage, extracting just by_package_key values
+    function _decode_quote_level_detail(d::ProtoBuf.AbstractProtoDecoder)
+        packages = QuotePackageDetail[]
+        while !message_done(d)
+            field_number, wire_type = decode_tag(d)
+            if field_number == 1                       # by_package_key map
+                len = decode(d, UInt64)
+                sub_d = ProtoDecoder(IOBuffer(read(d.io, len)))
+                pkg = _decode_package_map_entry(sub_d)
+                isnothing(pkg) || push!(packages, pkg)
+            else
+                skip(d, wire_type)                     # ignore by_market_code etc.
+            end
+        end
+        packages
+    end
+
+    struct UserQuoteProfileResponse
+        member_id::Int64
+        quote_level::String
+        quote_package_details::Vector{QuotePackageDetail}
+    end
+    UserQuoteProfileResponse() = UserQuoteProfileResponse(zero(Int64), "", QuotePackageDetail[])
+    default_values(::Type{UserQuoteProfileResponse}) =
+        (;member_id = zero(Int64), quote_level = "", quote_package_details = QuotePackageDetail[])
+    field_numbers(::Type{UserQuoteProfileResponse}) =
+        (;member_id = 1, quote_level = 2, quote_package_details = 6)
+
+    function decode(d::ProtoBuf.AbstractProtoDecoder, ::Type{<:UserQuoteProfileResponse})
+        member_id = zero(Int64)
+        quote_level = ""
+        packages = QuotePackageDetail[]
+        while !message_done(d)
+            field_number, wire_type = decode_tag(d)
+            if field_number == 1
+                member_id = decode(d, Int64)
+            elseif field_number == 2
+                quote_level = decode(d, String)
+            elseif field_number == 6
+                len = decode(d, UInt64)
+                sub_d = ProtoDecoder(IOBuffer(read(d.io, len)))
+                packages = _decode_quote_level_detail(sub_d)
+            else
+                skip(d, wire_type)                     # subscribe_limit / history_candlestick_limit / rate_limit
+            end
+        end
+        return UserQuoteProfileResponse(member_id, quote_level, packages)
+    end
+
+
 end # module

@@ -19,7 +19,8 @@ using ..QuoteProtocol: CandlePeriod, AdjustType, TradeSession, SubType, QuoteCom
         FilterWarrantExpiryDate, FilterWarrantInOutBoundsType, WarrantStatus, WarrantType,
         SortOrderType, WarrantSortBy, MarketTradePeriodResponse, MarketTradeDayRequest, MarketTradeDayResponse,
         CapitalFlowIntradayRequest, CapitalFlowIntradayResponse, CapitalDistributionResponse, MarketTemperatureResponse,
-        SecurityListCategory, SecuritiesUpdateMode
+        SecurityListCategory, SecuritiesUpdateMode,
+        UserQuoteProfileRequest, UserQuoteProfileResponse, QuotePackageDetail
 
 using ..Client: WSClient
 using ..Cache: SimpleCache, CacheWithKey, get_or_update, RealtimeStore,
@@ -34,7 +35,7 @@ using ..Errors
 import ..disconnect!
 
 export QuoteContext,
-       realtime_quote, subscribe, unsubscribe, static_info, depth, intraday,
+       quote_snapshot, realtime_quote, subscribe, unsubscribe, static_info, depth, intraday,
        brokers, trades, candlesticks,
        history_candlesticks_by_offset, history_candlesticks_by_date,
        option_chain_expiry_date_list, option_chain_info_by_date,
@@ -43,13 +44,15 @@ export QuoteContext,
        option_quote, warrant_quote, participants, subscriptions,
        option_chain_dates, option_chain_strikes, warrant_issuers, warrant_list,
        trading_session, trading_days, capital_flow, capital_distribution,
-       calc_indexes, member_id, quote_level, option_chain_expiry_date_list,
+       calc_indexes, member_id, quote_level, quote_package_details, filings,
+       option_chain_expiry_date_list,
        market_temperature, history_market_temperature,
        watchlist, create_watchlist_group, delete_watchlist_group, update_watchlist_group,
        security_list,
        # Realtime cache methods
        realtime_depth, realtime_brokers, realtime_trades, realtime_candlesticks,
-       subscribe_candlesticks, unsubscribe_candlesticks
+       subscribe_candlesticks, unsubscribe_candlesticks,
+       FilingItem
 
 # Quote-specific command for WebSocket protobuf requests
 struct GenericRequestCmd{R,T} <: AbstractCommand
@@ -80,6 +83,7 @@ mutable struct InnerQuoteContext
     # Info from Core
     member_id::Int64
     quote_level::String
+    quote_package_details::Vector{QuotePackageDetail}
 end
 
 @doc """
@@ -125,10 +129,27 @@ function core_run(inner::InnerQuoteContext, push_tx::Channel{Tuple{UInt8, Vector
                 end
             end
 
-            # TODO: Fetch member_id and quote_level after connection
-            # For now, we'll leave them as default.
-            # inner.member_id = ...
-            # inner.quote_level = ...
+            # Fetch user profile (member_id / quote_level / quote_package_details)
+            try
+                lang = inner.config.language
+                lang_str = lang === Constant.Language.ZH_CN ? "zh-CN" :
+                           lang === Constant.Language.ZH_HK ? "zh-HK" :
+                           lang === Constant.Language.EN    ? "en"    : "zh-CN"
+                profile_req = UserQuoteProfileRequest(lang_str)
+                io_buf = IOBuffer()
+                encoder = ProtoBuf.ProtoEncoder(io_buf)
+                ProtoBuf.encode(encoder, profile_req)
+                resp_body = Client.ws_request(inner.ws_client, UInt8(QuoteCommand.QueryUserQuoteProfile), take!(io_buf))
+                if !isempty(resp_body)
+                    decoder = ProtoBuf.ProtoDecoder(IOBuffer(resp_body))
+                    profile = ProtoBuf.decode(decoder, UserQuoteProfileResponse)
+                    inner.member_id = profile.member_id
+                    inner.quote_level = profile.quote_level
+                    inner.quote_package_details = profile.quote_package_details
+                end
+            catch e
+                @warn "Failed to fetch user quote profile" exception=(e, catch_backtrace())
+            end
 
             # 2. Main Command Processing Loop
             for cmd in inner.command_ch
@@ -291,7 +312,7 @@ function QuoteContext(config::Config.Settings)
         # Realtime store
         RealtimeStore{PushQuote, PushDepth, PushBrokers, Trade, Candlestick}(),
         # Core info
-        0, "",
+        0, "", QuotePackageDetail[],
     )
     
     ctx = QuoteContext(Arc(inner))
@@ -357,12 +378,35 @@ function unsubscribe(ctx::QuoteContext, symbols::Vector{String}, sub_types::Vect
     return [(symbol = s, sub_types = sub_types) for s in symbols]
 end
 
-function realtime_quote(ctx::QuoteContext, symbols::Vector{String})
+"""
+    quote_snapshot(ctx::QuoteContext, symbols::Vector{String}) -> DataFrame
+
+Fetch a one-shot quote snapshot from the server (WebSocket request).
+Use [`realtime_quote`](@ref) instead when you have an active subscription and want the
+locally cached latest push.
+
+Mirrors Rust SDK `QuoteContext::quote`.
+"""
+function quote_snapshot(ctx::QuoteContext, symbols::Vector{String})
     req = MultiSecurityRequest(symbols)
     cmd = GenericRequestCmd(QuoteCommand.QuerySecurityQuote, req, SecurityQuoteResponse, Channel(1))
     resp = request(ctx, cmd)
     return DataFrame(to_namedtuple(resp.secu_quote))
 end
+
+"""
+    realtime_quote(ctx::QuoteContext, symbol::String) -> Union{Nothing, PushQuote}
+    realtime_quote(ctx::QuoteContext, symbols::Vector{String}) -> Vector{Union{Nothing, PushQuote}}
+
+Read the latest quote(s) pushed by the server from the local store. Returns `nothing`
+for any symbol that has not received a push yet (subscribe first via [`subscribe`](@ref)).
+
+Mirrors Rust SDK `QuoteContext::realtime_quote`. For a one-shot server query, use
+[`quote_snapshot`](@ref).
+"""
+realtime_quote(ctx::QuoteContext, symbol::String) = get_quote(ctx.inner.store, symbol)
+realtime_quote(ctx::QuoteContext, symbols::Vector{String}) =
+    [get_quote(ctx.inner.store, s) for s in symbols]
 
 function candlesticks(
     ctx::QuoteContext, symbol::String, period::CandlePeriod.T = DAY, count::Int64 = 365; 
@@ -774,6 +818,7 @@ end
 
 member_id(ctx::QuoteContext) = ctx.inner.member_id
 quote_level(ctx::QuoteContext) = ctx.inner.quote_level
+quote_package_details(ctx::QuoteContext) = ctx.inner.quote_package_details
 
 # --- Watchlist API ---
 
@@ -1148,5 +1193,52 @@ export ShortPosition, ShortPositionsResponse,
        OptionVolumeStats, OptionVolumeDailyStat, OptionVolumeDaily,
        PinnedMode,
        short_positions, option_volume, option_volume_daily, update_pinned
+
+# ── filings ────────────────────────────────────────────────────────────
+
+"""
+公司公告（filings）单条记录。
+"""
+struct FilingItem
+    id::String
+    title::String
+    description::String
+    file_name::String
+    file_urls::Vector{String}
+    published_at::DateTime          # converted from unix seconds (publish_at)
+end
+StructTypes.StructType(::Type{FilingItem}) = StructTypes.CustomStruct()
+function StructTypes.construct(::Type{FilingItem}, obj::JSON3.Object)
+    urls = if haskey(obj, :file_urls) && !isnothing(obj.file_urls)
+        [String(u) for u in obj.file_urls]
+    else
+        String[]
+    end
+    ts = get(obj, :publish_at, 0)
+    ts_int = ts isa AbstractString ? parse(Int64, ts) : Int64(ts)
+    FilingItem(
+        String(get(obj, :id, "")),
+        String(get(obj, :title, "")),
+        String(get(obj, :description, "")),
+        String(get(obj, :file_name, "")),
+        urls,
+        unix2datetime(ts_int),
+    )
+end
+
+"""
+    filings(ctx::QuoteContext, symbol::AbstractString) -> Vector{FilingItem}
+
+公司公告列表（REST）。
+
+端点：`GET /v1/quote/filings`
+"""
+function filings(ctx::QuoteContext, symbol::AbstractString)
+    params = Dict{String,Any}("symbol" => String(symbol))
+    resp = Errors.ApiResponse(Client.http_get(ctx.inner.config, "/v1/quote/filings"; params))
+    resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    items_obj = haskey(resp.data, :items) ? resp.data.items : ()
+    return [StructTypes.construct(FilingItem, x) for x in items_obj]
+end
 
 end # module Quote

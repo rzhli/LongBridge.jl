@@ -2,6 +2,44 @@
 
 # Release Notes
 
+## v0.7.0 (2026-05-19)
+
+### New Features — 补齐与上游 LongPort SDK Rust v4.1.0 的完全同步（130 个方法 1:1 对齐）
+
+- **新 `AssetContext`（2 个方法）** —— `statements(ctx, type; page, page_size)` 与 `statement_download_url(ctx, file_key)`，对应上游 `/v1/statement/list` 和 `/v1/statement/download`。新增 `StatementType.{Daily, Monthly}` 枚举与 `StatementItem`/`GetStatementListResponse`/`GetStatementResponse` 结构。
+- **`QuoteContext.filings(ctx, symbol)`** —— 公司公告列表（REST `/v1/quote/filings`），`publish_at` unix 秒自动转 `DateTime`。新增 `FilingItem` 结构。
+- **`QuoteContext.quote_package_details(ctx)`** —— 当前账户已订阅的行情包详情列表（`Vector{QuotePackageDetail}`，含 `key/name/description/start_at/end_at`）。
+
+### Behavior changes（**破坏性**）
+
+- **`realtime_quote` 语义变更**：原本是「向服务器一次性查询」，现在改为「读本地缓存的最新推送行情」，与 `realtime_depth`/`realtime_brokers`/`realtime_trades` 一致（这是 Rust SDK 的语义）。
+  - 旧行为迁移到新方法 **`quote_snapshot(ctx, symbols)`**（一次性服务器请求，仍返回 `DataFrame`）。
+  - 新 `realtime_quote(ctx, symbol::String)` 返回单条 `Union{Nothing, PushQuote}`；`realtime_quote(ctx, symbols::Vector{String})` 返回 `Vector{Union{Nothing, PushQuote}}`。
+- **`member_id` / `quote_level` 现在会真正拉取**：之前是返回零值的桩。`QuoteContext` 在 WebSocket 鉴权成功后会主动发 `QueryUserQuoteProfile (cmd=4)`，把 `member_id`、`quote_level`、`quote_package_details` 落到 `InnerQuoteContext`。失败只 warn 不阻断。
+
+### Internals
+
+- `QuoteProtocol.jl` 新增手写 protobuf 编解码：`UserQuoteProfileRequest`、`UserQuoteProfileResponse`、`QuotePackageDetail`。`UserQuoteLevelDetail.by_package_key` 是 proto `map<string, PackageDetail>`，按 protobuf 规范展开为 entry 子消息（field 1=key, field 2=value），跳过暂不消费的 `by_market_code` / `rate_limit` / `subscribe_limit`。
+- `Config.language` (`Language.{ZH_CN,ZH_HK,EN}`) 按上游 wire 格式转 `"zh-CN"` / `"zh-HK"` / `"en"`。
+
+### Migration
+
+```julia
+# 旧（v0.6.x）
+df = realtime_quote(ctx, ["AAPL.US", "TSLA.US"])
+
+# 新（v0.7.0）
+df = quote_snapshot(ctx, ["AAPL.US", "TSLA.US"])  # 服务器查询，DataFrame
+
+# 想读本地缓存（订阅后才有数据）
+subscribe(ctx, ["AAPL.US"], [SubType.QUOTE])
+q = realtime_quote(ctx, "AAPL.US")                # Union{Nothing, PushQuote}
+```
+
+### Reference comparison tooling
+
+- `.upstream/` 目录加入 `.gitignore`，可用于本地克隆 `longbridge/openapi` 做 1:1 方法对比。
+
 ## v0.6.0 (2026-05-18)
 
 ### New Features — 移植上游 LongPort SDK v4.1.0 的 9 个新 Context（共 70 个新方法、~5,100 行）

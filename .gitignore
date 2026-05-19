@@ -30,3 +30,6 @@ config.toml
 # test files
 test.jl
 openapi-reference/
+
+# Upstream reference clones (for cross-version comparison)
+.upstream/

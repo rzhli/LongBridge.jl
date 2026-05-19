@@ -179,6 +179,50 @@ try
 
     # 把自选股置顶（取消置顶用 PinnedMode.Remove）
     # update_pinned(qctx, PinnedMode.Add, ["700.HK", "AAPL.US"])
+
+    # ────────────────────────────────────────────────────────────────────
+    # v0.7.0 新增：UserProfile / filings / quote_snapshot vs realtime_quote
+    # ────────────────────────────────────────────────────────────────────
+
+    # 行情账号信息（连接后由 QueryUserQuoteProfile 自动拉取）
+    @info "user profile" member_id=member_id(qctx) quote_level=quote_level(qctx)
+    for pkg in quote_package_details(qctx)
+        @info "package" pkg.key pkg.name pkg.start_at pkg.end_at
+    end
+
+    # 公司公告（REST /v1/quote/filings）
+    for f in filings(qctx, "AAPL.US")
+        @info "filing" f.title f.published_at f.file_urls
+    end
+
+    # 一次性服务器查询（旧 realtime_quote 的行为）
+    display(quote_snapshot(qctx, ["AAPL.US", "TSLA.US"]))
+
+    # 本地缓存读取：先订阅，再读
+    subscribe(qctx, ["AAPL.US"], [SubType.QUOTE]; is_first_push=true)
+    sleep(1)                            # 等一条推送进来
+    q = realtime_quote(qctx, "AAPL.US")
+    isnothing(q) ? @info("尚无推送到达") : @info("cached quote", last_done=q.last_done, ts=q.timestamp)
+    unsubscribe(qctx, ["AAPL.US"], [SubType.QUOTE])
 finally
     disconnect!(qctx)
 end
+
+# ════════════════════════════════════════════════════════════════════════
+# AssetContext v0.7.0 — 账户结算单
+# ════════════════════════════════════════════════════════════════════════
+
+ac = AssetContext(cfg)
+
+# 月度结算单（第 1 页，每页 20 条）
+sl = statements(ac, StatementType.Monthly; page=1, page_size=20)
+for item in sl.list
+    @info "statement" date=item.dt file_key=item.file_key
+end
+
+# 用第一条记录的 file_key 换下载链接
+if !isempty(sl.list)
+    url = statement_download_url(ac, sl.list[1].file_key)
+    @info "下载链接（短期有效）" url=url.url
+end
+

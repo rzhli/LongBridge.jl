@@ -89,7 +89,7 @@ ctx = QuoteContext(cfg)
 resp = static_info(ctx, ["700.HK", "AAPL.US", "TSLA.US"])
 
 # 获取标的实时行情
-quotes = realtime_quote(ctx, ["GOOGL.US", "AAPL.US", "TSLA.US"])
+quotes = quote_snapshot(ctx, ["GOOGL.US", "AAPL.US", "TSLA.US"])
 
 # 获取期权实时行情
 resp = option_quote(ctx, ["AAPL230317P160000.US"])
@@ -221,7 +221,8 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 
 ### 行情拉取
 - `static_info(ctx, symbols)`: 获取标的基础信息
-- `realtime_quote(ctx, symbols)`: 获取股票实时行情
+- `quote_snapshot(ctx, symbols)`: 获取股票实时行情快照（一次性服务器查询）
+- `realtime_quote(ctx, symbol_or_symbols)`: 从本地缓存读取最新推送的行情（需先 `subscribe`）
 - `option_quote(ctx, symbols)`: 获取期权实时行情
 - `warrant_quote(ctx, symbols)`: 获取轮证实时行情
 - `depth(ctx, symbol)`: 获取标的盘口数据
@@ -384,6 +385,17 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `option_volume(ctx, symbol)`: 实时期权认购/认沽成交量
 - `option_volume_daily(ctx, symbol, timestamp, count)`: 历史日度期权统计
 - `update_pinned(ctx, mode::PinnedMode.T, symbols)`: 自选股置顶/取消置顶
+
+### 行情（QuoteContext，v0.7.0 新增）
+- `quote_snapshot(ctx, symbols)`: 一次性服务器行情查询（即 v0.6.x 的 `realtime_quote` 行为）
+- `realtime_quote(ctx, symbol_or_symbols)`: 从本地缓存读取最新推送的行情（需先 `subscribe`），与 `realtime_depth/brokers/trades` 语义一致
+- `filings(ctx, symbol)`: 公司公告列表（REST `/v1/quote/filings`），返回 `Vector{FilingItem}`
+- `member_id(ctx)` / `quote_level(ctx)` / `quote_package_details(ctx)`: 连接后通过 `QueryUserQuoteProfile` 拉取的真实值（v0.6.x 是零值桩）
+
+### 账户结算单（AssetContext，v0.7.0 新增）
+- `AssetContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
+- `statements(ctx, type::StatementType.T; page, page_size)`: 结算单分页列表（`type` 为 `Daily` / `Monthly`）
+- `statement_download_url(ctx, file_key)`: 用 `file_key` 换取结算单下载链接
 
 ## 许可证
 

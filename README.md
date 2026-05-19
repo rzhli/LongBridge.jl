@@ -88,8 +88,8 @@ ctx = QuoteContext(cfg)
 # Get basic static information for securities
 resp = static_info(ctx, ["700.HK", "AAPL.US", "TSLA.US"])
 
-# Get real-time quotes for securities
-quotes = realtime_quote(ctx, ["GOOGL.US", "AAPL.US", "TSLA.US"])
+# Get real-time quotes for securities (one-shot server snapshot)
+quotes = quote_snapshot(ctx, ["GOOGL.US", "AAPL.US", "TSLA.US"])
 
 # Get real-time option quotes
 resp = option_quote(ctx, ["AAPL230317P160000.US"])
@@ -221,7 +221,8 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 
 ### Quote Fetching
 - `static_info(ctx, symbols)`: Get basic static information for securities
-- `realtime_quote(ctx, symbols)`: Get real-time stock quotes
+- `quote_snapshot(ctx, symbols)`: Get a one-shot snapshot of real-time stock quotes (server query)
+- `realtime_quote(ctx, symbol_or_symbols)`: Read the latest pushed quote from the local cache (requires prior `subscribe`)
 - `option_quote(ctx, symbols)`: Get real-time option quotes
 - `warrant_quote(ctx, symbols)`: Get real-time warrant quotes
 - `depth(ctx, symbol)`: Get market depth data for a security
@@ -356,6 +357,17 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `short_positions(ctx, symbol)`: US short interest (FINRA bi-monthly)
 - `option_volume(ctx, symbol)` / `option_volume_daily(ctx, symbol, timestamp, count)`: Option volume stats
 - `update_pinned(ctx, mode::PinnedMode.T, symbols)`: Pin/unpin watchlist securities
+
+### Quote Additions (v0.7.0)
+- `quote_snapshot(ctx, symbols)`: One-shot quote snapshot via WebSocket (was previously `realtime_quote`)
+- `realtime_quote(ctx, symbol_or_symbols)`: Read latest pushed quote from local cache (subscribe first); aligned with `realtime_depth/brokers/trades`
+- `filings(ctx, symbol)`: Company filings list (REST `/v1/quote/filings`), returns `Vector{FilingItem}`
+- `member_id(ctx)` / `quote_level(ctx)` / `quote_package_details(ctx)`: Now backed by a real `QueryUserQuoteProfile` call on connect (previously returned zero-value stubs)
+
+### Account Statements (`AssetContext`, new in v0.7.0)
+- `AssetContext(config)`: Create context (HTTP-only, no disconnect needed)
+- `statements(ctx, type::StatementType.T; page, page_size)`: Paginated list of statement records (`type` = `Daily` / `Monthly`)
+- `statement_download_url(ctx, file_key)`: Resolve a statement record's download URL
 
 ## License
 

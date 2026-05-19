@@ -10,6 +10,9 @@ include("test_p0_smoke.jl")
 # P1 新增 Context 烟测
 include("test_p1_smoke.jl")
 
+# v0.7.0 上游同步（Asset / filings / UserQuoteProfile / realtime_quote 重命名）
+include("test_v0_7_0_sync.jl")
+
 @testset "Config defaults" begin
     mktemp() do f, io
         write(io, """
