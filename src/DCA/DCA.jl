@@ -177,13 +177,13 @@ module DCA
     # ── dca_check_support ──────────────────────────────────────────────
 
     """
-        dca_check_support(ctx, symbols::AbstractVector) -> DcaSupportList
+        dca_check_support(ctx, symbols::AbstractVector{<:AbstractString}) -> DcaSupportList
 
     批量查询标的是否支持定投。
 
     端点：`POST /v1/dailycoins/batch-check-support`
     """
-    function dca_check_support(ctx::DCAContext, symbols::AbstractVector)
+    function dca_check_support(ctx::DCAContext, symbols::AbstractVector{<:AbstractString})
         counter_ids = String[symbol_to_counter_id(s) for s in symbols]
         body = Dict{String,Any}("counter_ids" => counter_ids)
         resp = ApiResponse(Client.http_post(ctx.config, "/v1/dailycoins/batch-check-support"; body))

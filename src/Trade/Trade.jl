@@ -157,12 +157,36 @@ end
     end
 
 
+    # Type-stable specializations: each command produces a known concrete
+    # response type, so we assert it after `take!` and let the compiler
+    # propagate the type to call-site field accesses.
+    function request(ctx::TradeContext, cmd::SubscribeCmd)
+        put!(ctx.inner.command_ch, cmd)
+        resp = take!(cmd.resp_ch)
+        resp isa Exception && throw(resp)
+        return resp::SubResponse
+    end
+
+    function request(ctx::TradeContext, cmd::UnsubscribeCmd)
+        put!(ctx.inner.command_ch, cmd)
+        resp = take!(cmd.resp_ch)
+        resp isa Exception && throw(resp)
+        return resp::UnsubResponse
+    end
+
+    function request(ctx::TradeContext,
+                     cmd::Union{HttpGetCmd,HttpPostCmd,HttpPutCmd,HttpDeleteCmd})
+        put!(ctx.inner.command_ch, cmd)
+        resp = take!(cmd.resp_ch)
+        resp isa Exception && throw(resp)
+        return resp::ApiResponse
+    end
+
+    # Defensive fallback (shouldn't be hit in practice; kept for safety).
     function request(ctx::TradeContext, cmd::AbstractCommand)
         put!(ctx.inner.command_ch, cmd)
         resp = take!(cmd.resp_ch)
-        if resp isa Exception
-            throw(resp)
-        end
+        resp isa Exception && throw(resp)
         return resp
     end
 
@@ -175,7 +199,9 @@ end
                 if val isa Date || val isa DateTime
                     d[key] = string(round(Int, datetime2unix(DateTime(val))))
                 elseif val isa Vector && !isempty(val)
-                    d[key] = [v isa Enum ? Int(v) : string(v) for v in val]
+                    # Coerce to homogeneous Vector{String} to avoid Union widening
+                    # to Vector{Any} that the previous comprehension produced.
+                    d[key] = String[v isa Enum ? string(Int(v)) : string(v) for v in val]
                 elseif val isa Enum
                     d[key] = Int(val)
                 else

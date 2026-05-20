@@ -44,6 +44,9 @@ pc = PortfolioContext(cfg)
 # 分红历史
 display(dividend(fc, "700.HK"))
 
+# 分红详情（最近 + 历史方案）
+display(dividend_detail(fc, "700.HK"))
+
 # 机构评级（并行 fan-out：latest + summary 两个端点）
 display(institution_rating(fc, "AAPL.US"))
 
@@ -53,8 +56,14 @@ display(institution_rating_detail(fc, "AAPL.US"))
 # P/E、P/B、P/S、股息率快照（含历史 high/low/median）
 display(valuation(fc, "TSLA.US"))
 
+# 估值历史时间序列（PE/PB/PS/股息率）
+display(valuation_history(fc, "TSLA.US"))
+
 # 行业可比公司估值对比
 display(industry_valuation(fc, "TSLA.US"))
+
+# 行业估值分布（行业内分位数）
+display(industry_valuation_dist(fc, "TSLA.US"))
 
 # 公司概况（董事长、网站、员工数、IPO 价等）
 display(company(fc, "AAPL.US"))
@@ -70,6 +79,12 @@ display(fund_holder(fc, "AAPL.US"))
 
 # 公司行动（分红、拆股、回购）
 display(corp_action(fc, "AAPL.US"))
+
+# 对外投资关系（被投公司列表）
+display(invest_relation(fc, "AAPL.US"))
+
+# 经营报告与关键指标
+display(operating(fc, "AAPL.US"))
 
 # 营收/利润/EPS 一致预期 vs 实际
 display(consensus(fc, "AAPL.US"))

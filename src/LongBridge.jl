@@ -285,6 +285,24 @@ module LongBridge
                 throw(Errors.LongBridgeError(0, "warm"))
             catch
             end
+
+            # HTTP-only Context constructors — these only store cfg and
+            # spawn nothing, so they're safe to invoke at precompile time.
+            # Forces method specialization for the constructor chain and
+            # any default-arg paths each context uses.
+            AssetContext(cfg)
+            CalendarContext(cfg)
+            FundamentalContext(cfg)
+            MarketContext(cfg)
+            PortfolioContext(cfg)
+            AlertContext(cfg)
+            SharelistContext(cfg)
+            DCAContext(cfg)
+            ContentContext(cfg)
+
+            # Warm small helpers commonly hit on first user call.
+            Utils.symbol_to_counter_id("700.HK")
+            Utils.counter_id_to_symbol("ST/HK/700")
         end
     end
 

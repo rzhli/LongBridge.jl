@@ -329,6 +329,19 @@ Disconnects the WebSocket and shuts down the background actor.
 """
 
 # Internal helper to send a command and wait for response
+#
+# Type-stable fast path for protobuf WS requests: the cmd carries the
+# response Type as a parameter, so we can assert ::T after `take!` and
+# propagate concrete type info to every downstream `.field` access at
+# the call site (eliminates the previous Any → field-access widening).
+function request(ctx::QuoteContext, cmd::GenericRequestCmd{R,T}) where {R,T}
+    put!(ctx.inner.command_ch, cmd)
+    resp = take!(cmd.resp_ch)
+    resp isa Exception && throw(resp)
+    return resp::T
+end
+
+# Generic fallback for HTTP* commands (no compile-time response type).
 function request(ctx::QuoteContext, cmd::AbstractCommand)
     put!(ctx.inner.command_ch, cmd)
     resp = take!(cmd.resp_ch)
@@ -345,7 +358,7 @@ function request(ctx::QuoteContext, cmd::AbstractCommand)
     if resp isa String
         return JSON3.read(resp)
     end
-    
+
     return resp
 end
 

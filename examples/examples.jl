@@ -85,7 +85,11 @@ end
 @time expiry_date = option_chain_expiry_date_list(ctx, "AAPL.US")
 
 ### 获取标的的期权链到期日期权标的列表 (返回空值，需开通OPRA美股期权行情权限？)
-@time info = option_chain_info_by_date(ctx, "AAPL.US", Date(2025, 8, 22))
+@time info = option_chain_info_by_date(ctx, "AAPL.US", Date(2026, 8, 21))
+
+### 期权链 REST 辅助方法（与上面 WS 版本互补）
+@time resp = option_chain_dates(ctx, "AAPL.US")
+@time resp = option_chain_strikes(ctx, "AAPL.US", "2026-08-21")
 
 ### 获取轮证发行商ID （DataFrame）
 @time resp = warrant_issuers(ctx)
@@ -267,17 +271,27 @@ println("Cached candlesticks: ", length(cached_candlesticks), " bars")
 ### 取消K线订阅并清除缓存
 unsubscribe_candlesticks(ctx, "700.HK", CandlePeriod.DAY)
 
-### 创建自选股分组
-group_id = create_watchlist_group(ctx, "Watchlist1", securities = ["700.HK", "AAPL.US"])
+### K 线推送回调（注意：当前 SDK 的 push dispatcher 还未路由 PushCandlestick 事件，
+### 回调注册了不会触发；上游 Rust SDK 也是订阅后用 realtime_candlesticks 轮询，
+### 这里 set_on_candlestick 的钩子是为未来对接准备的）
+function on_candlestick_callback(symbol::String, candle)
+    println("Candlestick: $symbol close=$(candle.close) ts=$(unix2datetime(candle.timestamp))")
+end
+set_on_candlestick(ctx, on_candlestick_callback)
+
+### 创建自选股分组（⚠️ 写操作，默认注释掉）
+# group_id = create_watchlist_group(ctx, "Watchlist1"; securities = ["700.HK", "AAPL.US"])
 
 ### 查看自选股分组
 @time resp = watchlist(ctx)
 
-### 删除自选股
-message = delete_watchlist_group(ctx, 4281496, true)
+### 删除自选股分组（⚠️ 写操作 + 需要真实 group_id；从上面的 watchlist(ctx) 拿到 id 后再调）
+# message = delete_watchlist_group(ctx, group_id, true)
 
-### 更新自选股
-update_watchlist_group(ctx, 10086, name = "WatchList2", securities = ["700.HK", "AAPL.US"], mode = SecuritiesUpdateMode.Add)
+### 更新自选股分组（⚠️ 写操作 + 需要真实 group_id）
+# update_watchlist_group(ctx, group_id; name = "WatchList2",
+#                        securities = ["700.HK", "AAPL.US"],
+#                        mode = SecuritiesUpdateMode.Add)
 
 ### 获取标的列表（美股，只有中文名称name_cn）
 @time resp = security_list(ctx, Market.US, SecurityListCategory.Overnight)
@@ -309,69 +323,73 @@ ctx = TradeContext(cfg)
 @time resp = estimate_max_purchase_quantity(ctx, EstimateMaxPurchaseQuantityOptions(symbol = "700.HK", order_type = OrderType.LO, side = OrderSide.Buy))
 
 ### 委托下单,用于港美股，窝轮，期权的委托下单
-# 限价单：  
-@time resp = submit_order(
-    ctx, SubmitOrderOptions(
-        symbol = "700.HK",
-        order_type = OrderType.LO,
-        side = OrderSide.Buy,
-        submitted_quantity = 100,
-        time_in_force = TimeInForceType.Day,       # 表示订单当日有效
-        submitted_price = 480.0         # 需传递submitted_price
-    )
-)
+### ⚠️ 以下所有 submit_order 都是**真实下单**操作，默认注释掉。
+### 取消注释前请确认参数（标的、数量、价格、市场休/开市状态）和账户资金。
 
-# 平仓卖出 
-@time resp = submit_order(
-    ctx, SubmitOrderOptions(
-        symbol = "700.HK",
-        order_type = OrderType.MO,      # 市价单
-        side = OrderSide.Sell,
-        submitted_quantity = 100,
-        time_in_force = TimeInForceType.Day,    
-        submitted_price = 380.0         # 需传递submitted_price
-    )
-)
+# 限价单
+# @time resp = submit_order(
+#     ctx, SubmitOrderOptions(
+#         symbol = "700.HK",
+#         order_type = OrderType.LO,
+#         side = OrderSide.Buy,
+#         submitted_quantity = 100,
+#         time_in_force = TimeInForceType.Day,       # 表示订单当日有效
+#         submitted_price = 480.0         # 需传递submitted_price
+#     )
+# )
 
-# 到价止盈止损 
-@time resp = submit_order(
-    ctx, SubmitOrderOptions(
-        symbol = "NVDA.US",
-        order_type = OrderType.LIT,      # 挂单为触价限价单
-        side = OrderSide.Sell,
-        submitted_quantity = 100,
-        time_in_force = TimeInForceType.GTC,    # 订单撤销前有效
-        trigger_price = 1000.0,         # 当行情价格达到触发价格时，订单会被提交
-        submitted_price = 999.0         # 以999.0元提交
-    )
-)
+# 平仓卖出（市价）
+# @time resp = submit_order(
+#     ctx, SubmitOrderOptions(
+#         symbol = "700.HK",
+#         order_type = OrderType.MO,      # 市价单
+#         side = OrderSide.Sell,
+#         submitted_quantity = 100,
+#         time_in_force = TimeInForceType.Day,
+#         submitted_price = 380.0         # 需传递submitted_price
+#     )
+# )
+
+# 到价止盈止损（触价限价单）
+# @time resp = submit_order(
+#     ctx, SubmitOrderOptions(
+#         symbol = "NVDA.US",
+#         order_type = OrderType.LIT,      # 挂单为触价限价单
+#         side = OrderSide.Sell,
+#         submitted_quantity = 100,
+#         time_in_force = TimeInForceType.GTC,    # 订单撤销前有效
+#         trigger_price = 1000.0,         # 当行情价格达到触发价格时，订单会被提交
+#         submitted_price = 999.0         # 以999.0元提交
+#     )
+# )
 
 # 跟踪止盈止损 当挂出该条件单以后，如果NVDA.US的市价在下单后的最高点回落0.5%时，
 # 比如最高点为1100USD，回落0.5%为1094.5USD，那么订单会以1094.5USD - 1.2 = 1093.3 USD的价格挂出限价单
-@time resp = submit_order(
-    ctx, SubmitOrderOptions(
-        symbol = "NVDA.US",
-        side = OrderSide.Sell,
-        order_type = OrderType.TSLPPCT, # 挂单为跟踪止损限价单(跟踪涨跌幅)，如果想要使用跟踪金额，可以使用TSLPAMT，需填trailing_amount
-        time_in_force = TimeInForceType.GTD,    # 订单到期前有效
-        expire_date = "2025-10-30",    # 订单到期时间
-        submitted_quantity = 100,
-        trailing_percent = 0.5,    # 跟踪涨跌幅0.5表示0.5%
-        limit_offset = 1.2,     # 指定价差，1.2 表示 1.2 USD，如果不需要指定价差，可以传递 0 或不传
-    )
-)
+# @time resp = submit_order(
+#     ctx, SubmitOrderOptions(
+#         symbol = "NVDA.US",
+#         side = OrderSide.Sell,
+#         order_type = OrderType.TSLPPCT, # 挂单为跟踪止损限价单(跟踪涨跌幅)，如果想要使用跟踪金额，可以使用TSLPAMT，需填trailing_amount
+#         time_in_force = TimeInForceType.GTD,    # 订单到期前有效
+#         expire_date = "2027-10-30",    # 订单到期时间（确保是将来日期）
+#         submitted_quantity = 100,
+#         trailing_percent = 0.5,    # 跟踪涨跌幅0.5表示0.5%
+#         limit_offset = 1.2,     # 指定价差，1.2 表示 1.2 USD，如果不需要指定价差，可以传递 0 或不传
+#     )
+# )
 
-### 修改订单
-@time resp = replace_order(
-    ctx, ReplaceOrderOptions(
-        order_id = "709043056541253632", 
-        submitted_quantity = 100, 
-        submitted_price = 50.0
-    )
-)
+### 修改订单 ⚠️ 写操作 + 需要真实 order_id
+### 用法：先用 today_orders(ctx) 拿到一笔未成交订单的 order_id
+# @time resp = replace_order(
+#     ctx, ReplaceOrderOptions(
+#         order_id = "<在此填入真实 order_id>",
+#         submitted_quantity = 100,
+#         submitted_price = 50.0
+#     )
+# )
 
-### 撤销订单
-@time resp = cancel_order(ctx, "1200001443583500288")
+### 撤销订单 ⚠️ 写操作 + 需要真实 order_id
+# @time resp = cancel_order(ctx, "<在此填入真实 order_id>")
 
 ### 获取当日订单
 # 指定股票
@@ -393,8 +411,8 @@ ctx = TradeContext(cfg)
 # 不指定股票
 @time resp = history_orders(ctx)
 
-### 订单详情
-@time resp = order_detail(ctx, "1138677649372094464")
+### 订单详情 ⚠️ 需要真实 order_id；先用 today_orders / history_orders 拿一个
+# @time resp = order_detail(ctx, "<在此填入真实 order_id>")
 
 
 ## 交易推送

@@ -125,17 +125,17 @@ module Sharelist
 
     # ── add / remove / sort securities ─────────────────────────────────
 
-    _join_counter_ids(symbols::AbstractVector) =
+    _join_counter_ids(symbols::AbstractVector{<:AbstractString}) =
         join((symbol_to_counter_id(s) for s in symbols), ",")
 
     """
-        add_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector) -> Any
+        add_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector{<:AbstractString}) -> Any
 
     向自选股列表追加证券。
 
     端点：`POST /v1/sharelists/{id}/items`
     """
-    function add_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector)
+    function add_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector{<:AbstractString})
         body = Dict{String,Any}("counter_ids" => _join_counter_ids(symbols))
         resp = ApiResponse(Client.http_post(ctx.config, "/v1/sharelists/$(Int64(id))/items"; body))
         _check(resp)
@@ -143,13 +143,13 @@ module Sharelist
     end
 
     """
-        remove_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector) -> Any
+        remove_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector{<:AbstractString}) -> Any
 
     从自选股列表移除证券。
 
     端点：`DELETE /v1/sharelists/{id}/items`
     """
-    function remove_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector)
+    function remove_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector{<:AbstractString})
         body = Dict{String,Any}("counter_ids" => _join_counter_ids(symbols))
         resp = ApiResponse(Client.http_delete(ctx.config, "/v1/sharelists/$(Int64(id))/items"; body))
         _check(resp)
@@ -157,13 +157,13 @@ module Sharelist
     end
 
     """
-        sort_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector) -> Any
+        sort_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector{<:AbstractString}) -> Any
 
     按给定顺序重排自选股列表中的证券。
 
     端点：`POST /v1/sharelists/{id}/items/sort`
     """
-    function sort_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector)
+    function sort_sharelist_securities(ctx::SharelistContext, id::Integer, symbols::AbstractVector{<:AbstractString})
         body = Dict{String,Any}("counter_ids" => _join_counter_ids(symbols))
         resp = ApiResponse(Client.http_post(ctx.config, "/v1/sharelists/$(Int64(id))/items/sort"; body))
         _check(resp)
