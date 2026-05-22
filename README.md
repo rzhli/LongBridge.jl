@@ -369,6 +369,34 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `statements(ctx, type::StatementType.T; page, page_size)`: Paginated list of statement records (`type` = `Daily` / `Monthly`)
 - `statement_download_url(ctx, file_key)`: Resolve a statement record's download URL
 
+### Stock Screener (`ScreenerContext`, new in v0.8.0)
+- `ScreenerContext(config)`: Create context (HTTP-only, no disconnect needed)
+- `screener_recommend_strategies(ctx)`: Recommended built-in screener strategies
+- `screener_user_strategies(ctx)`: Current user's saved screener strategies
+- `screener_strategy(ctx, id)`: Detail of one strategy
+- `screener_search(ctx, market, strategy_id, page, size)`: Run a strategy and page results
+- `screener_indicators(ctx)`: Available screener indicator definitions
+
+### Fundamental (`FundamentalContext`, new in v0.8.0)
+- `business_segments(ctx, symbol)`: Latest business segment revenue breakdown
+- `business_segments_history(ctx, symbol; report, cate)`: Historical business + regional segment snapshots
+- `institution_rating_views(ctx, symbol)`: Historical analyst rating distribution time series
+- `industry_rank(ctx, market, indicator, sort_type, limit)`: Industry rank in a market
+- `industry_peers(ctx, counter_or_symbol, market; industry_id)`: Recursive industry peer chain
+- `financial_report_snapshot(ctx, symbol; report, fiscal_year, fiscal_period)`: Earnings snapshot (actual vs estimate, key ratios)
+- `shareholder_top(ctx, symbol)`: Top-shareholder ranking (raw JSON)
+- `shareholder_detail(ctx, symbol, object_id)`: Holding history for one shareholder object (raw JSON)
+- `valuation_comparison(ctx, symbol, currency; comparison_symbols)`: Valuation comparison (PE/PB/PS) with historical curve
+
+### Market (`MarketContext`, new in v0.8.0)
+- `top_movers(ctx, markets, sort, limit; date)`: Top movers across one or more markets (renamed from upstream `stock_events`)
+- `rank_categories(ctx)`: Available rank category keys/labels (raw JSON)
+- `rank_list(ctx, key; need_article)`: Ranked securities for one category
+
+### Quote (`QuoteContext`, breaking + new in v0.8.0)
+- `short_positions(ctx, symbol; count=20)`: **Breaking** — unified HK + US short-position endpoint (was US-only with fixed `last_timestamp=0, page_size=100`). The item struct is now `ShortPositionsItem` and the response drops `symbol`/`sources`. Timestamps are `DateTime` (UTC).
+- `short_trades(ctx, symbol; count=20)`: HK/US short-trade records, endpoint auto-selected by `.HK` suffix.
+
 ## License
 
 MIT License

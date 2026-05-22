@@ -2,6 +2,57 @@
 
 # Release Notes
 
+## v0.8.0 (2026-05-22)
+
+### New Features — 跟进上游 LongPort SDK v4.2.0（19 个新 API + 1 个新 Context）
+
+- **新 `ScreenerContext`（5 个方法）** —— 选股器：`screener_recommend_strategies`（推荐策略）、`screener_user_strategies`（我的策略）、`screener_strategy(id)`（策略详情）、`screener_search(market, strategy_id, page, size)`（按策略筛选）、`screener_indicators`（指标元数据）。上游均返回结构多变的 JSON，本端口统一以 `data::Any` 字段保留原始 JSON。
+- **`FundamentalContext` +9 个方法** —— `business_segments`（最新业务分部）、`business_segments_history`（历史业务+地区分部）、`institution_rating_views`（机构评级分布历史时间序列）、`industry_rank(market, indicator, sort_type, limit)`（行业排名）、`industry_peers(counter_or_symbol, market; industry_id)`（行业同业链，节点 `next` 递归）、`financial_report_snapshot(symbol; report, fiscal_year, fiscal_period)`（财报快照含 vs 预期对比）、`shareholder_top`（主要股东排行）、`shareholder_detail(symbol, object_id)`（指定股东持仓明细）、`valuation_comparison(symbol, currency; comparison_symbols)`（估值对比含 PE/PB/PS 历史曲线，`history.date` 自动转 `DateTime`）。
+- **`MarketContext` +3 个方法** —— `top_movers(markets, sort, limit; date)`（异动榜，对应上游重命名后的端点 `POST /v1/quote/market/stock-events`；`timestamp` 自动转 `DateTime`）、`rank_categories`（排行榜分类元数据）、`rank_list(key; need_article)`（指定分类的排行榜）。
+- **`QuoteContext.short_trades(ctx, symbol; count=20)`** —— 新增做空成交端点，按 `symbol` 后缀自动选择 `/v1/quote/short-trades/hk` 或 `/v1/quote/short-trades/us`。
+
+### Breaking changes（与上游对齐）
+
+- **`short_positions` 签名与端点统一**：
+  - 旧：`short_positions(ctx, symbol)` 固定走 `/v1/quote/short-positions/us`，参数固定 `last_timestamp=0, page_size=100`。
+  - 新：`short_positions(ctx, symbol; count=20)` 按 `symbol` 后缀自动选择 `/hk` 或 `/us`，`last_timestamp` 取当前时间。
+- **响应类型 typed**：
+  - `ShortPosition` → 重命名并扩展为 `ShortPositionsItem`，新增 HK 字段 `amount`/`balance`/`cost`（与原有 US 字段并存，按品种填充对应字段）。
+  - `ShortPositionsResponse` 不再含 `symbol`/`sources` 外层字段，仅保留 `data::Vector{ShortPositionsItem}`。
+  - 新增 `ShortTradesItem` / `ShortTradesResponse`。
+- **时间戳字段从 `String` 改为 `DateTime` (UTC)**：`ShortPositionsItem.timestamp`、`ShortTradesItem.timestamp`、`TopMoversEvent.timestamp`、`ValuationHistoryPoint.date` 均由原始 unix 秒（API 既返回字符串也返回整数）自动转换。沿用 v0.7 `FilingItem.published_at` 的做法。
+
+### Migration
+
+```julia
+# 旧（v0.7.x）—— 美股专用
+resp = short_positions(ctx, "AAPL.US")  # 固定查 100 条美股记录
+
+# 新（v0.8.0）—— 美股
+resp = short_positions(ctx, "AAPL.US"; count=20)
+# 新（v0.8.0）—— 港股（端点自动切到 /short-positions/hk）
+resp = short_positions(ctx, "700.HK"; count=20)
+
+# 历史代码访问 ShortPosition 字段：
+for item in resp.data
+    println(item.timestamp, " ", item.rate, " ", item.current_shares_short)
+end
+# 注意：item 类型从 `ShortPosition` 改名为 `ShortPositionsItem`；
+#       `timestamp` 现在是 `DateTime` 而不是 `String`。
+```
+
+### Internals
+
+- 新 `Core/ScreenerProtocol.jl` 模块，5 个原始 JSON 包装结构（`data::Any`）。
+- `Core/FundamentalProtocol.jl` 末尾追加 v4.2.0 的 21 个新类型（含递归的 `IndustryPeerNode`）。
+- `Core/MarketProtocol.jl` 末尾追加 `TopMoversStock/Event/Response`、`RankListItem/Response`、`RankCategoriesResponse`。
+- `Core/QuoteProtocol.jl` 中的 `ShortPosition*` 类型保留为 `Quote.jl` 内的定义（与现状一致）；重写为新结构。
+- 精编预热：`ScreenerContext(cfg)` 加入 `@compile_workload`。
+
+### Reference
+
+上游对应版本：[longbridge/openapi v4.2.0](https://github.com/longbridge/openapi/releases/tag/v4.2.0)（2026-05-22 发布）。
+
 ## v0.7.0 (2026-05-19)
 
 ### New Features — 补齐与上游 LongPort SDK Rust v4.1.0 的完全同步（130 个方法 1:1 对齐）

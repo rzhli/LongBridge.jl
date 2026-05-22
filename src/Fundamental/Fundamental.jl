@@ -13,7 +13,13 @@ module Fundamental
            dividend, dividend_detail, forecast_eps, consensus,
            valuation, valuation_history, industry_valuation, industry_valuation_dist,
            company, executive, shareholder, fund_holder,
-           corp_action, invest_relation, operating, buyback, ratings
+           corp_action, invest_relation, operating, buyback, ratings,
+           business_segments, business_segments_history,
+           institution_rating_views,
+           industry_rank, industry_peers,
+           financial_report_snapshot,
+           shareholder_top, shareholder_detail,
+           valuation_comparison
 
     """
         FundamentalContext(config::Config.Settings)
@@ -369,6 +375,206 @@ module Fundamental
         resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/ratings"; params))
         _check(resp)
         StructTypes.construct(StockRatings, resp.data)
+    end
+
+    # ════════════════════════════════════════════════════════════════════
+    # v4.2.0 新增（9 个方法）
+    # ════════════════════════════════════════════════════════════════════
+
+    # ── 21. business_segments ──────────────────────────────────────────
+
+    """
+        business_segments(ctx, symbol) -> BusinessSegments
+
+    最新一期业务分部收入构成。
+
+    端点：`GET /v1/quote/fundamentals/business-segments`
+    """
+    function business_segments(ctx::FundamentalContext, symbol::AbstractString)
+        params = Dict{String,Any}("counter_id" => symbol_to_counter_id(symbol))
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/fundamentals/business-segments"; params))
+        _check(resp)
+        StructTypes.construct(BusinessSegments, resp.data)
+    end
+
+    # ── 22. business_segments_history ──────────────────────────────────
+
+    """
+        business_segments_history(ctx, symbol; report=nothing, cate=nothing) -> BusinessSegmentsHistory
+
+    历史业务分部+地区构成。`report`/`cate` 为可选过滤参数（透传至 API）。
+
+    端点：`GET /v1/quote/fundamentals/business-segments/history`
+    """
+    function business_segments_history(
+        ctx::FundamentalContext, symbol::AbstractString;
+        report::Union{AbstractString,Nothing}=nothing,
+        cate::Union{AbstractString,Nothing}=nothing,
+    )
+        params = Dict{String,Any}("counter_id" => symbol_to_counter_id(symbol))
+        isnothing(report) || (params["report"] = String(report))
+        isnothing(cate)   || (params["cate"]   = String(cate))
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/fundamentals/business-segments/history"; params))
+        _check(resp)
+        StructTypes.construct(BusinessSegmentsHistory, resp.data)
+    end
+
+    # ── 23. institution_rating_views ───────────────────────────────────
+
+    """
+        institution_rating_views(ctx, symbol) -> InstitutionRatingViews
+
+    机构评级分布的历史时间序列（每个时点的 buy/hold/sell 等分布）。
+
+    端点：`GET /v1/quote/ratings/institutional`
+    """
+    function institution_rating_views(ctx::FundamentalContext, symbol::AbstractString)
+        params = Dict{String,Any}("counter_id" => symbol_to_counter_id(symbol))
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/ratings/institutional"; params))
+        _check(resp)
+        StructTypes.construct(InstitutionRatingViews, resp.data)
+    end
+
+    # ── 24. industry_rank ──────────────────────────────────────────────
+
+    """
+        industry_rank(ctx, market, indicator, sort_type, limit) -> IndustryRankResponse
+
+    某市场下按指定指标排序的行业排名。
+
+    端点：`GET /v1/quote/industry/rank`
+    """
+    function industry_rank(
+        ctx::FundamentalContext,
+        market::AbstractString,
+        indicator::AbstractString,
+        sort_type::AbstractString,
+        limit::Integer,
+    )
+        params = Dict{String,Any}(
+            "market"    => String(market),
+            "indicator" => String(indicator),
+            "sort_type" => String(sort_type),
+            "limit"     => Int(limit),
+        )
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/industry/rank"; params))
+        _check(resp)
+        StructTypes.construct(IndustryRankResponse, resp.data)
+    end
+
+    # ── 25. industry_peers ─────────────────────────────────────────────
+
+    """
+        industry_peers(ctx, counter_or_symbol, market; industry_id=nothing) -> IndustryPeersResponse
+
+    行业同业链——可传 symbol（如 `"AAPL.US"`，内部转 `counter_id`）或已是 `counter_id`（含 `/`）。
+
+    端点：`GET /v1/quote/industries/peers`（固定 `type=1`）
+    """
+    function industry_peers(
+        ctx::FundamentalContext,
+        counter_or_symbol::AbstractString,
+        market::AbstractString;
+        industry_id::Union{AbstractString,Nothing}=nothing,
+    )
+        raw = String(counter_or_symbol)
+        cid = occursin('/', raw) ? raw : symbol_to_counter_id(raw)
+        params = Dict{String,Any}(
+            "type"        => "1",
+            "market"      => String(market),
+            "industry_id" => something(industry_id, ""),
+            "counter_id"  => cid,
+        )
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/industries/peers"; params))
+        _check(resp)
+        StructTypes.construct(IndustryPeersResponse, resp.data)
+    end
+
+    # ── 26. financial_report_snapshot ──────────────────────────────────
+
+    """
+        financial_report_snapshot(ctx, symbol; report=nothing, fiscal_year=nothing, fiscal_period=nothing) -> FinancialReportSnapshot
+
+    财报快照（业绩 vs 预期、关键指标比率）。
+
+    端点：`GET /v1/quote/financials/earnings-snapshot`
+    """
+    function financial_report_snapshot(
+        ctx::FundamentalContext, symbol::AbstractString;
+        report::Union{AbstractString,Nothing}=nothing,
+        fiscal_year::Union{Integer,Nothing}=nothing,
+        fiscal_period::Union{AbstractString,Nothing}=nothing,
+    )
+        params = Dict{String,Any}("counter_id" => symbol_to_counter_id(symbol))
+        isnothing(report)        || (params["report"]        = String(report))
+        isnothing(fiscal_year)   || (params["fiscal_year"]   = Int(fiscal_year))
+        isnothing(fiscal_period) || (params["fiscal_period"] = String(fiscal_period))
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/financials/earnings-snapshot"; params))
+        _check(resp)
+        StructTypes.construct(FinancialReportSnapshot, resp.data)
+    end
+
+    # ── 27. shareholder_top ────────────────────────────────────────────
+
+    """
+        shareholder_top(ctx, symbol) -> ShareholderTopResponse
+
+    主要股东排行（原始 JSON 保留——结构因品种而异）。
+
+    端点：`GET /v1/quote/shareholders/top`
+    """
+    function shareholder_top(ctx::FundamentalContext, symbol::AbstractString)
+        params = Dict{String,Any}("counter_id" => symbol_to_counter_id(symbol))
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/shareholders/top"; params))
+        _check(resp)
+        StructTypes.construct(ShareholderTopResponse, resp.data)
+    end
+
+    # ── 28. shareholder_detail ─────────────────────────────────────────
+
+    """
+        shareholder_detail(ctx, symbol, object_id) -> ShareholderDetailResponse
+
+    指定股东对象的持仓历史明细（`object_id` 来自 `shareholder` / `shareholder_top` 返回中的对象 ID）。
+
+    端点：`GET /v1/quote/shareholders/holding`
+    """
+    function shareholder_detail(ctx::FundamentalContext, symbol::AbstractString, object_id::Integer)
+        params = Dict{String,Any}(
+            "counter_id" => symbol_to_counter_id(symbol),
+            "object_id"  => string(Int64(object_id)),
+        )
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/shareholders/holding"; params))
+        _check(resp)
+        StructTypes.construct(ShareholderDetailResponse, resp.data)
+    end
+
+    # ── 29. valuation_comparison ───────────────────────────────────────
+
+    """
+        valuation_comparison(ctx, symbol, currency; comparison_symbols=nothing) -> ValuationComparisonResponse
+
+    某证券与可选同业的估值对比（含 PE/PB/PS 历史曲线）。
+
+    `comparison_symbols`：可选对比 symbol 列表，内部会逐个转 `counter_id` 后序列化。
+
+    端点：`GET /v1/quote/compare/valuation`
+    """
+    function valuation_comparison(
+        ctx::FundamentalContext, symbol::AbstractString, currency::AbstractString;
+        comparison_symbols::Union{Vector{<:AbstractString},Nothing}=nothing,
+    )
+        params = Dict{String,Any}(
+            "counter_id" => symbol_to_counter_id(symbol),
+            "currency"   => String(currency),
+        )
+        if !isnothing(comparison_symbols)
+            ids = String[symbol_to_counter_id(s) for s in comparison_symbols]
+            params["comparison_counter_ids"] = JSON3.write(ids)
+        end
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/compare/valuation"; params))
+        _check(resp)
+        StructTypes.construct(ValuationComparisonResponse, resp.data)
     end
 
 end # module Fundamental

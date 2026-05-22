@@ -27,6 +27,14 @@ module FundamentalProtocol
            OperatingIndicator, OperatingFinancial, OperatingItem, OperatingList,
            RecentBuybacks, BuybackHistoryItem, BuybackRatios, BuybackData,
            RatingLeafIndicator, RatingIndicator, RatingSubIndicatorGroup, RatingCategory, StockRatings,
+           BusinessSegmentItem, BusinessSegments,
+           BusinessSegmentHistoryItem, BusinessSegmentsHistoricalItem, BusinessSegmentsHistory,
+           InstitutionRatingViewItem, InstitutionRatingViews,
+           IndustryRankItem, IndustryRankGroup, IndustryRankResponse,
+           IndustryPeersTop, IndustryPeerNode, IndustryPeersResponse,
+           SnapshotForecastMetric, SnapshotReportedMetric, FinancialReportSnapshot,
+           ShareholderTopResponse, ShareholderDetailResponse,
+           ValuationHistoryPoint, ValuationComparisonItem, ValuationComparisonResponse,
            _financial_report_kind_str, _financial_report_period_str, _institution_recommend_from_str
 
     @enumx FinancialReportKind begin
@@ -1300,6 +1308,424 @@ module FundamentalProtocol
             get(obj, :industry_median_score, nothing),
             cats,
         )
+    end
+
+    # ════════════════════════════════════════════════════════════════════
+    # v4.2.0 新增类型
+    # ════════════════════════════════════════════════════════════════════
+
+    # ── business_segments ──────────────────────────────────────────────
+
+    struct BusinessSegmentItem
+        name::String
+        percent::String
+    end
+    StructTypes.StructType(::Type{BusinessSegmentItem}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{BusinessSegmentItem}, obj::JSON3.Object) =
+        BusinessSegmentItem(String(get(obj, :name, "")), String(get(obj, :percent, "")))
+
+    struct BusinessSegments
+        date::String
+        total::String
+        currency::String
+        business::Vector{BusinessSegmentItem}
+    end
+    StructTypes.StructType(::Type{BusinessSegments}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{BusinessSegments}, obj::JSON3.Object)
+        items = if haskey(obj, :business) && !isnothing(obj.business)
+            [StructTypes.construct(BusinessSegmentItem, x) for x in obj.business]
+        else
+            BusinessSegmentItem[]
+        end
+        BusinessSegments(
+            String(get(obj, :date,     "")),
+            String(get(obj, :total,    "")),
+            String(get(obj, :currency, "")),
+            items,
+        )
+    end
+
+    struct BusinessSegmentHistoryItem
+        name::String
+        percent::String
+        value::String
+    end
+    StructTypes.StructType(::Type{BusinessSegmentHistoryItem}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{BusinessSegmentHistoryItem}, obj::JSON3.Object) =
+        BusinessSegmentHistoryItem(
+            String(get(obj, :name,    "")),
+            String(get(obj, :percent, "")),
+            String(get(obj, :value,   "")),
+        )
+
+    struct BusinessSegmentsHistoricalItem
+        date::String
+        total::String
+        currency::String
+        business::Vector{BusinessSegmentHistoryItem}
+        regionals::Vector{BusinessSegmentHistoryItem}
+    end
+    StructTypes.StructType(::Type{BusinessSegmentsHistoricalItem}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{BusinessSegmentsHistoricalItem}, obj::JSON3.Object)
+        bs = if haskey(obj, :business) && !isnothing(obj.business)
+            [StructTypes.construct(BusinessSegmentHistoryItem, x) for x in obj.business]
+        else
+            BusinessSegmentHistoryItem[]
+        end
+        rs = if haskey(obj, :regionals) && !isnothing(obj.regionals)
+            [StructTypes.construct(BusinessSegmentHistoryItem, x) for x in obj.regionals]
+        else
+            BusinessSegmentHistoryItem[]
+        end
+        BusinessSegmentsHistoricalItem(
+            String(get(obj, :date,     "")),
+            String(get(obj, :total,    "")),
+            String(get(obj, :currency, "")),
+            bs, rs,
+        )
+    end
+
+    struct BusinessSegmentsHistory
+        historical::Vector{BusinessSegmentsHistoricalItem}
+    end
+    StructTypes.StructType(::Type{BusinessSegmentsHistory}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{BusinessSegmentsHistory}, obj::JSON3.Object)
+        items = if haskey(obj, :historical) && !isnothing(obj.historical)
+            [StructTypes.construct(BusinessSegmentsHistoricalItem, x) for x in obj.historical]
+        else
+            BusinessSegmentsHistoricalItem[]
+        end
+        BusinessSegmentsHistory(items)
+    end
+
+    # ── institution_rating_views ───────────────────────────────────────
+
+    """
+    机构评级历史分布的单条快照。`date` 是 unix 时间戳字符串（API 偶尔返回裸整数，原样保留）。
+    """
+    struct InstitutionRatingViewItem
+        date::String
+        buy::String
+        over::String
+        hold::String
+        under::String
+        sell::String
+        total::String
+    end
+    StructTypes.StructType(::Type{InstitutionRatingViewItem}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{InstitutionRatingViewItem}, obj::JSON3.Object)
+        d = get(obj, :date, "")
+        InstitutionRatingViewItem(
+            d isa AbstractString ? String(d) : string(d),
+            String(get(obj, :buy,   "")),
+            String(get(obj, :over,  "")),
+            String(get(obj, :hold,  "")),
+            String(get(obj, :under, "")),
+            String(get(obj, :sell,  "")),
+            String(get(obj, :total, "")),
+        )
+    end
+
+    struct InstitutionRatingViews
+        elist::Vector{InstitutionRatingViewItem}
+    end
+    StructTypes.StructType(::Type{InstitutionRatingViews}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{InstitutionRatingViews}, obj::JSON3.Object)
+        items = if haskey(obj, :elist) && !isnothing(obj.elist)
+            [StructTypes.construct(InstitutionRatingViewItem, x) for x in obj.elist]
+        else
+            InstitutionRatingViewItem[]
+        end
+        InstitutionRatingViews(items)
+    end
+
+    # ── industry_rank ──────────────────────────────────────────────────
+
+    struct IndustryRankItem
+        name::String
+        counter_id::String
+        chg::String
+        leading_name::String
+        leading_ticker::String
+        leading_chg::String
+        value_name::String
+        value_data::String
+    end
+    StructTypes.StructType(::Type{IndustryRankItem}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{IndustryRankItem}, obj::JSON3.Object) =
+        IndustryRankItem(
+            String(get(obj, :name,            "")),
+            String(get(obj, :counter_id,      "")),
+            String(get(obj, :chg,             "")),
+            String(get(obj, :leading_name,    "")),
+            String(get(obj, :leading_ticker,  "")),
+            String(get(obj, :leading_chg,     "")),
+            String(get(obj, :value_name,      "")),
+            String(get(obj, :value_data,      "")),
+        )
+
+    struct IndustryRankGroup
+        lists::Vector{IndustryRankItem}
+    end
+    StructTypes.StructType(::Type{IndustryRankGroup}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{IndustryRankGroup}, obj::JSON3.Object)
+        items = if haskey(obj, :lists) && !isnothing(obj.lists)
+            [StructTypes.construct(IndustryRankItem, x) for x in obj.lists]
+        else
+            IndustryRankItem[]
+        end
+        IndustryRankGroup(items)
+    end
+
+    struct IndustryRankResponse
+        items::Vector{IndustryRankGroup}
+    end
+    StructTypes.StructType(::Type{IndustryRankResponse}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{IndustryRankResponse}, obj::JSON3.Object)
+        groups = if haskey(obj, :items) && !isnothing(obj.items)
+            [StructTypes.construct(IndustryRankGroup, x) for x in obj.items]
+        else
+            IndustryRankGroup[]
+        end
+        IndustryRankResponse(groups)
+    end
+
+    # ── industry_peers ─────────────────────────────────────────────────
+
+    struct IndustryPeersTop
+        name::String
+        market::String
+    end
+    StructTypes.StructType(::Type{IndustryPeersTop}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{IndustryPeersTop}, obj::JSON3.Object) =
+        IndustryPeersTop(String(get(obj, :name, "")), String(get(obj, :market, "")))
+
+    """
+    递归的行业同业节点（`next` 字段含子节点）。
+    """
+    struct IndustryPeerNode
+        name::String
+        counter_id::String
+        stock_num::Int
+        chg::String
+        ytd_chg::String
+        next::Vector{IndustryPeerNode}
+    end
+    StructTypes.StructType(::Type{IndustryPeerNode}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{IndustryPeerNode}, obj::JSON3.Object)
+        children = if haskey(obj, :next) && !isnothing(obj.next)
+            [StructTypes.construct(IndustryPeerNode, x) for x in obj.next]
+        else
+            IndustryPeerNode[]
+        end
+        IndustryPeerNode(
+            String(get(obj, :name,       "")),
+            String(get(obj, :counter_id, "")),
+            Int(get(obj, :stock_num, 0)),
+            String(get(obj, :chg,        "")),
+            String(get(obj, :ytd_chg,    "")),
+            children,
+        )
+    end
+
+    struct IndustryPeersResponse
+        top::IndustryPeersTop
+        chain::Union{IndustryPeerNode,Nothing}
+    end
+    StructTypes.StructType(::Type{IndustryPeersResponse}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{IndustryPeersResponse}, obj::JSON3.Object)
+        top_obj = get(obj, :top, nothing)
+        top = top_obj === nothing ? IndustryPeersTop("", "") :
+                                    StructTypes.construct(IndustryPeersTop, top_obj)
+        chain_obj = get(obj, :chain, nothing)
+        chain = chain_obj === nothing ? nothing :
+                                        StructTypes.construct(IndustryPeerNode, chain_obj)
+        IndustryPeersResponse(top, chain)
+    end
+
+    # ── financial_report_snapshot ──────────────────────────────────────
+
+    struct SnapshotForecastMetric
+        value::String
+        yoy::String
+        cmp_desc::String
+        est_value::String
+    end
+    StructTypes.StructType(::Type{SnapshotForecastMetric}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{SnapshotForecastMetric}, obj::JSON3.Object) =
+        SnapshotForecastMetric(
+            String(get(obj, :value,     "")),
+            String(get(obj, :yoy,       "")),
+            String(get(obj, :cmp_desc,  "")),
+            String(get(obj, :est_value, "")),
+        )
+
+    struct SnapshotReportedMetric
+        value::String
+        yoy::String
+    end
+    StructTypes.StructType(::Type{SnapshotReportedMetric}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{SnapshotReportedMetric}, obj::JSON3.Object) =
+        SnapshotReportedMetric(String(get(obj, :value, "")), String(get(obj, :yoy, "")))
+
+    struct FinancialReportSnapshot
+        name::String
+        ticker::String
+        fp_start::String
+        fp_end::String
+        currency::String
+        report_desc::String
+        fo_revenue::Union{SnapshotForecastMetric,Nothing}
+        fo_ebit::Union{SnapshotForecastMetric,Nothing}
+        fo_eps::Union{SnapshotForecastMetric,Nothing}
+        fr_revenue::Union{SnapshotReportedMetric,Nothing}
+        fr_profit::Union{SnapshotReportedMetric,Nothing}
+        fr_operate_cash::Union{SnapshotReportedMetric,Nothing}
+        fr_invest_cash::Union{SnapshotReportedMetric,Nothing}
+        fr_finance_cash::Union{SnapshotReportedMetric,Nothing}
+        fr_total_assets::Union{SnapshotReportedMetric,Nothing}
+        fr_total_liability::Union{SnapshotReportedMetric,Nothing}
+        fr_roe_ttm::String
+        fr_profit_margin::String
+        fr_profit_margin_ttm::String
+        fr_asset_turn_ttm::String
+        fr_leverage_ttm::String
+        fr_debt_assets_ratio::String
+    end
+    StructTypes.StructType(::Type{FinancialReportSnapshot}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{FinancialReportSnapshot}, obj::JSON3.Object)
+        _opt_f(k) = let v = get(obj, k, nothing)
+            v === nothing ? nothing : StructTypes.construct(SnapshotForecastMetric, v)
+        end
+        _opt_r(k) = let v = get(obj, k, nothing)
+            v === nothing ? nothing : StructTypes.construct(SnapshotReportedMetric, v)
+        end
+        FinancialReportSnapshot(
+            String(get(obj, :name,        "")),
+            String(get(obj, :ticker,      "")),
+            String(get(obj, :fp_start,    "")),
+            String(get(obj, :fp_end,      "")),
+            String(get(obj, :currency,    "")),
+            String(get(obj, :report_desc, "")),
+            _opt_f(:fo_revenue),
+            _opt_f(:fo_ebit),
+            _opt_f(:fo_eps),
+            _opt_r(:fr_revenue),
+            _opt_r(:fr_profit),
+            _opt_r(:fr_operate_cash),
+            _opt_r(:fr_invest_cash),
+            _opt_r(:fr_finance_cash),
+            _opt_r(:fr_total_assets),
+            _opt_r(:fr_total_liability),
+            String(get(obj, :fr_roe_ttm,           "")),
+            String(get(obj, :fr_profit_margin,     "")),
+            String(get(obj, :fr_profit_margin_ttm, "")),
+            String(get(obj, :fr_asset_turn_ttm,    "")),
+            String(get(obj, :fr_leverage_ttm,      "")),
+            String(get(obj, :fr_debt_assets_ratio, "")),
+        )
+    end
+
+    # ── shareholder_top / shareholder_detail (raw JSON) ────────────────
+
+    """
+    `shareholder_top` 的原始 JSON 响应包装。结构因品种而变，保留原 `JSON3.Object`。
+    """
+    struct ShareholderTopResponse
+        data::Any
+    end
+    StructTypes.StructType(::Type{ShareholderTopResponse}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{ShareholderTopResponse}, obj) = ShareholderTopResponse(obj)
+
+    """
+    `shareholder_detail` 的原始 JSON 响应包装。
+    """
+    struct ShareholderDetailResponse
+        data::Any
+    end
+    StructTypes.StructType(::Type{ShareholderDetailResponse}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{ShareholderDetailResponse}, obj) = ShareholderDetailResponse(obj)
+
+    # ── valuation_comparison ───────────────────────────────────────────
+
+    """
+    一条历史估值数据点。`date` 由 unix 秒字符串转 `DateTime` (UTC)。
+    """
+    struct ValuationHistoryPoint
+        date::DateTime
+        pe::String
+        pb::String
+        ps::String
+    end
+    StructTypes.StructType(::Type{ValuationHistoryPoint}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{ValuationHistoryPoint}, obj::JSON3.Object)
+        ts_raw = get(obj, :date, 0)
+        ts_int = ts_raw isa AbstractString ? parse(Int64, ts_raw) : Int64(ts_raw)
+        ValuationHistoryPoint(
+            unix2datetime(ts_int),
+            String(get(obj, :pe, "")),
+            String(get(obj, :pb, "")),
+            String(get(obj, :ps, "")),
+        )
+    end
+
+    """
+    一只证券在估值对比中的一行。`symbol` 由 `counter_id` 转换。
+    """
+    struct ValuationComparisonItem
+        symbol::String
+        name::String
+        currency::String
+        market_value::String
+        price_close::String
+        pe::String
+        pb::String
+        ps::String
+        roe::String
+        eps::String
+        bps::String
+        dps::String
+        div_yld::String
+        assets::String
+        history::Vector{ValuationHistoryPoint}
+    end
+    StructTypes.StructType(::Type{ValuationComparisonItem}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{ValuationComparisonItem}, obj::JSON3.Object)
+        hist = if haskey(obj, :history) && !isnothing(obj.history)
+            [StructTypes.construct(ValuationHistoryPoint, x) for x in obj.history]
+        else
+            ValuationHistoryPoint[]
+        end
+        ValuationComparisonItem(
+            counter_id_to_symbol(String(get(obj, :counter_id, ""))),
+            String(get(obj, :name,         "")),
+            String(get(obj, :currency,     "")),
+            String(get(obj, :market_value, "")),
+            String(get(obj, :price_close,  "")),
+            String(get(obj, :pe,           "")),
+            String(get(obj, :pb,           "")),
+            String(get(obj, :ps,           "")),
+            String(get(obj, :roe,          "")),
+            String(get(obj, :eps,          "")),
+            String(get(obj, :bps,          "")),
+            String(get(obj, :dps,          "")),
+            String(get(obj, :div_yld,      "")),
+            String(get(obj, :assets,       "")),
+            hist,
+        )
+    end
+
+    struct ValuationComparisonResponse
+        list::Vector{ValuationComparisonItem}
+    end
+    StructTypes.StructType(::Type{ValuationComparisonResponse}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{ValuationComparisonResponse}, obj::JSON3.Object)
+        items = if haskey(obj, :list) && !isnothing(obj.list)
+            [StructTypes.construct(ValuationComparisonItem, x) for x in obj.list]
+        else
+            ValuationComparisonItem[]
+        end
+        ValuationComparisonResponse(items)
     end
 
 end # module FundamentalProtocol

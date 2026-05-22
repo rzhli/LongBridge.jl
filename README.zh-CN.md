@@ -397,6 +397,34 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `statements(ctx, type::StatementType.T; page, page_size)`: 结算单分页列表（`type` 为 `Daily` / `Monthly`）
 - `statement_download_url(ctx, file_key)`: 用 `file_key` 换取结算单下载链接
 
+### 选股器（ScreenerContext，v0.8.0 新增）
+- `ScreenerContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
+- `screener_recommend_strategies(ctx)`: 推荐的内置选股策略
+- `screener_user_strategies(ctx)`: 当前账户已保存的策略列表
+- `screener_strategy(ctx, id)`: 按 ID 获取单个策略详情
+- `screener_search(ctx, market, strategy_id, page, size)`: 用策略筛选证券（分页）
+- `screener_indicators(ctx)`: 所有可用的筛选指标元数据
+
+### 基本面（FundamentalContext，v0.8.0 新增）
+- `business_segments(ctx, symbol)`: 最新业务分部收入构成
+- `business_segments_history(ctx, symbol; report, cate)`: 历史业务 + 地区分部
+- `institution_rating_views(ctx, symbol)`: 机构评级分布的历史时间序列
+- `industry_rank(ctx, market, indicator, sort_type, limit)`: 行业排名
+- `industry_peers(ctx, counter_or_symbol, market; industry_id)`: 行业同业链（递归节点）
+- `financial_report_snapshot(ctx, symbol; report, fiscal_year, fiscal_period)`: 财报快照（vs 预期对比、关键比率）
+- `shareholder_top(ctx, symbol)`: 主要股东排行（原始 JSON）
+- `shareholder_detail(ctx, symbol, object_id)`: 指定股东对象的持仓明细（原始 JSON）
+- `valuation_comparison(ctx, symbol, currency; comparison_symbols)`: 估值对比（PE/PB/PS 含历史曲线）
+
+### 市场数据（MarketContext，v0.8.0 新增）
+- `top_movers(ctx, markets, sort, limit; date)`: 异动榜（对应上游重命名后的 `stock_events`）
+- `rank_categories(ctx)`: 可用的排行榜分类（原始 JSON）
+- `rank_list(ctx, key; need_article)`: 指定分类的排行榜列表
+
+### 行情（QuoteContext，v0.8.0 破坏性变更 + 新增）
+- `short_positions(ctx, symbol; count=20)`：**破坏性** —— HK/US 统一端点（原 US 专用），`ShortPosition` → `ShortPositionsItem` 并新增 HK 字段；响应去掉 `symbol`/`sources` 外层字段；`timestamp` 由 `String` 改为 `DateTime` (UTC)。
+- `short_trades(ctx, symbol; count=20)`：HK/US 做空成交记录，按 `.HK` 后缀自动选择端点。
+
 ## 许可证
 
 MIT License

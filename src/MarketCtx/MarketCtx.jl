@@ -10,7 +10,8 @@ module MarketCtx
 
     export MarketContext,
            market_status, broker_holding, broker_holding_detail, broker_holding_daily,
-           ah_premium, ah_premium_intraday, trade_stats, anomaly, constituent
+           ah_premium, ah_premium_intraday, trade_stats, anomaly, constituent,
+           top_movers, rank_categories, rank_list
 
     """
         MarketContext(config::Config.Settings)
@@ -174,6 +175,74 @@ module MarketCtx
         resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/index-constituents"; params))
         _check(resp)
         StructTypes.construct(IndexConstituents, resp.data)
+    end
+
+    # ── top_movers ─────────────────────────────────────────────────────
+
+    """
+        top_movers(ctx::MarketContext, markets::Vector{<:AbstractString}, sort::Integer, limit::Integer;
+                   date::Union{AbstractString,Nothing}=nothing) -> TopMoversResponse
+
+    异动榜（原 `stock_events`）。
+
+    - `markets`：`["HK"]`、`["US","HK"]` 等。
+    - `sort`：排序代码（0 升序，1 降序）。
+    - `limit`：返回条数。
+    - `date`：可选日期过滤，格式 `"YYYY-MM-DD"`。
+
+    端点：`POST /v1/quote/market/stock-events`
+    """
+    function top_movers(
+        ctx::MarketContext,
+        markets::Vector{<:AbstractString},
+        sort::Integer,
+        limit::Integer;
+        date::Union{AbstractString,Nothing}=nothing,
+    )
+        body = Dict{String,Any}(
+            "limit"   => Int(limit),
+            "sort"    => Int(sort),
+            "markets" => String[String(m) for m in markets],
+        )
+        isnothing(date) || (body["date"] = String(date))
+        resp = ApiResponse(Client.http_post(ctx.config, "/v1/quote/market/stock-events"; body))
+        _check(resp)
+        StructTypes.construct(TopMoversResponse, resp.data)
+    end
+
+    # ── rank_categories ────────────────────────────────────────────────
+
+    """
+        rank_categories(ctx::MarketContext) -> RankCategoriesResponse
+
+    可用的排行榜分类。响应结构因 API 演进而变，原样保留 JSON。
+
+    端点：`GET /v1/quote/market/rank/categories`
+    """
+    function rank_categories(ctx::MarketContext)
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/market/rank/categories"))
+        _check(resp)
+        StructTypes.construct(RankCategoriesResponse, resp.data)
+    end
+
+    # ── rank_list ──────────────────────────────────────────────────────
+
+    """
+        rank_list(ctx::MarketContext, key::AbstractString; need_article::Bool=false) -> RankListResponse
+
+    指定分类的排行榜列表。`key` 来自 `rank_categories`。
+
+    端点：`GET /v1/quote/market/rank/list`（固定 `delay_bmp=false`）
+    """
+    function rank_list(ctx::MarketContext, key::AbstractString; need_article::Bool=false)
+        params = Dict{String,Any}(
+            "key"          => String(key),
+            "delay_bmp"    => "false",
+            "need_article" => need_article ? "true" : "false",
+        )
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/market/rank/list"; params))
+        _check(resp)
+        StructTypes.construct(RankListResponse, resp.data)
     end
 
 end # module MarketCtx

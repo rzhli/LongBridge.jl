@@ -182,8 +182,13 @@ display(profit_analysis_by_market(pc; page=1, size=20, market="US"))
 
 qctx = QuoteContext(cfg)
 try
-    # 美股做空数据（FINRA 双月公布）
-    display(short_positions(qctx, "TSLA.US"))
+    # 美股做空数据（FINRA 双月公布；v0.8.0 起 HK 端点也走同一函数）
+    display(short_positions(qctx, "TSLA.US"; count=20))
+    # 港股做空（自动选 /v1/quote/short-positions/hk）
+    # display(short_positions(qctx, "700.HK"; count=20))
+
+    # v0.8.0 新增：做空成交记录
+    # display(short_trades(qctx, "AAPL.US"; count=20))
 
     # 实时认购/认沽成交量
     display(option_volume(qctx, "AAPL.US"))
@@ -241,3 +246,31 @@ if !isempty(sl.list)
     @info "下载链接（短期有效）" url=url.url
 end
 
+# ════════════════════════════════════════════════════════════════════════
+# v0.8.0 新增 —— 上游 LongPort SDK v4.2.0 对齐
+# ════════════════════════════════════════════════════════════════════════
+
+# Fundamental：9 个新方法
+fc = FundamentalContext(cfg)
+display(business_segments(fc, "AAPL.US"))                  # 最新业务分部构成
+# display(business_segments_history(fc, "AAPL.US"))        # 历史业务+地区分部
+# display(institution_rating_views(fc, "AAPL.US"))         # 评级分布时间序列
+# display(industry_rank(fc, "US", "pe", "asc", 20))        # 行业排名
+# display(industry_peers(fc, "AAPL.US", "US"))             # 同业链
+# display(financial_report_snapshot(fc, "AAPL.US"))        # 财报快照
+# display(shareholder_top(fc, "AAPL.US"))                  # 主要股东排行
+# display(valuation_comparison(fc, "AAPL.US", "USD"; comparison_symbols=["MSFT.US","GOOGL.US"]))
+
+# Market：3 个新方法
+mc = MarketContext(cfg)
+display(top_movers(mc, ["US"], 1, 20))                     # 异动榜（POST）
+# display(rank_categories(mc))                             # 排行榜分类
+# display(rank_list(mc, "us_top_gain"))                    # 用上面拿到的 key 查具体榜
+
+# Screener：5 个新方法（全部返回原始 JSON，可用 .data 索引取字段）
+sc = ScreenerContext(cfg)
+display(screener_indicators(sc))                           # 可用指标列表
+# display(screener_recommend_strategies(sc))               # 推荐策略
+# display(screener_user_strategies(sc))                    # 我的策略
+# display(screener_strategy(sc, 12345))                    # 单个策略详情
+# display(screener_search(sc, "US", 12345, 1, 20))         # 按策略筛选

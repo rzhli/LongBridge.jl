@@ -4,6 +4,7 @@ module LongBridge
     using PrecompileTools: @setup_workload, @compile_workload
 
     # Version
+    include_dependency(joinpath(@__DIR__, "..", "Project.toml"))
     const VERSION = TOML.parsefile(joinpath(pkgdir(@__MODULE__), "Project.toml"))["version"]
 
     # Forward declaration for multi-dispatch across modules
@@ -27,6 +28,7 @@ module LongBridge
     include("Core/DCAProtocol.jl")
     include("Core/ContentProtocol.jl")
     include("Core/AssetProtocol.jl")
+    include("Core/ScreenerProtocol.jl")
     include("OAuth.jl")
     include("Config.jl")
     include("Client.jl")
@@ -44,6 +46,7 @@ module LongBridge
     include("DCA/DCA.jl")
     include("Content/Content.jl")
     include("Asset/Asset.jl")
+    include("Screener/Screener.jl")
 
     using .Constant: Market, Currency
     using .ControlProtocol
@@ -58,6 +61,7 @@ module LongBridge
     using .DCAProtocol
     using .ContentProtocol
     using .AssetProtocol
+    using .ScreenerProtocol
     using .Commands
     using .Cache
     using .OAuth
@@ -77,6 +81,7 @@ module LongBridge
     using .DCA
     using .Content
     using .Asset
+    using .Screener
 
     #= ==================== Exports ==================== =#
 
@@ -133,7 +138,10 @@ module LongBridge
     export watchlist, create_watchlist_group, delete_watchlist_group, update_watchlist_group
     # v4.1.0 新增
     export short_positions, option_volume, option_volume_daily, update_pinned
-    export ShortPosition, ShortPositionsResponse,
+    # v4.2.0 新增
+    export short_trades
+    export ShortPositionsItem, ShortPositionsResponse,
+           ShortTradesItem, ShortTradesResponse,
            OptionVolumeStats, OptionVolumeDailyStat, OptionVolumeDaily,
            PinnedMode, FilingItem, QuotePackageDetail
 
@@ -177,7 +185,8 @@ module LongBridge
     # --- Market (市场数据) ---
     export MarketContext,
            market_status, broker_holding, broker_holding_detail, broker_holding_daily,
-           ah_premium, ah_premium_intraday, trade_stats, anomaly, constituent
+           ah_premium, ah_premium_intraday, trade_stats, anomaly, constituent,
+           top_movers, rank_categories, rank_list
     export BrokerHoldingPeriod, AhPremiumPeriod
     export MarketTimeItem, MarketStatusResponse,
            BrokerHoldingEntry, BrokerHoldingTop,
@@ -186,7 +195,10 @@ module LongBridge
            AhPremiumKline, AhPremiumKlines, AhPremiumIntraday,
            TradeStatistics, TradePriceLevel, TradeStatsResponse,
            AnomalyItem, AnomalyResponse,
-           ConstituentStock, IndexConstituents
+           ConstituentStock, IndexConstituents,
+           TopMoversStock, TopMoversEvent, TopMoversResponse,
+           RankCategoriesResponse,
+           RankListItem, RankListResponse
 
     # --- Fundamental (基本面) ---
     export FundamentalContext,
@@ -194,7 +206,13 @@ module LongBridge
            dividend, dividend_detail, forecast_eps, consensus,
            valuation, valuation_history, industry_valuation, industry_valuation_dist,
            company, executive, shareholder, fund_holder,
-           corp_action, invest_relation, operating, buyback, ratings
+           corp_action, invest_relation, operating, buyback, ratings,
+           business_segments, business_segments_history,
+           institution_rating_views,
+           industry_rank, industry_peers,
+           financial_report_snapshot,
+           shareholder_top, shareholder_detail,
+           valuation_comparison
     export FinancialReportKind, FinancialReportPeriod, InstitutionRecommend
     export FinancialReports,
            RatingEvaluate, RatingTarget, RatingSummaryEvaluate,
@@ -217,7 +235,15 @@ module LongBridge
            InvestSecurity, InvestRelations,
            OperatingIndicator, OperatingFinancial, OperatingItem, OperatingList,
            RecentBuybacks, BuybackHistoryItem, BuybackRatios, BuybackData,
-           RatingLeafIndicator, RatingIndicator, RatingSubIndicatorGroup, RatingCategory, StockRatings
+           RatingLeafIndicator, RatingIndicator, RatingSubIndicatorGroup, RatingCategory, StockRatings,
+           BusinessSegmentItem, BusinessSegments,
+           BusinessSegmentHistoryItem, BusinessSegmentsHistoricalItem, BusinessSegmentsHistory,
+           InstitutionRatingViewItem, InstitutionRatingViews,
+           IndustryRankItem, IndustryRankGroup, IndustryRankResponse,
+           IndustryPeersTop, IndustryPeerNode, IndustryPeersResponse,
+           SnapshotForecastMetric, SnapshotReportedMetric, FinancialReportSnapshot,
+           ShareholderTopResponse, ShareholderDetailResponse,
+           ValuationHistoryPoint, ValuationComparisonItem, ValuationComparisonResponse
 
     # --- Alert (价格提醒) ---
     export AlertContext,
@@ -260,6 +286,13 @@ module LongBridge
     export StatementType
     export StatementItem, GetStatementListResponse, GetStatementResponse
 
+    # --- Screener (选股器) ---
+    export ScreenerContext,
+           screener_recommend_strategies, screener_user_strategies,
+           screener_strategy, screener_search, screener_indicators
+    export ScreenerRecommendStrategiesResponse, ScreenerUserStrategiesResponse,
+           ScreenerStrategyResponse, ScreenerSearchResponse, ScreenerIndicatorsResponse
+
     # ==================== Precompile workload ====================
     # Force compilation of the most-used construction paths so a fresh REPL
     # session can hit the network within the first second instead of paying
@@ -299,6 +332,7 @@ module LongBridge
             SharelistContext(cfg)
             DCAContext(cfg)
             ContentContext(cfg)
+            ScreenerContext(cfg)
 
             # Warm small helpers commonly hit on first user call.
             Utils.symbol_to_counter_id("700.HK")

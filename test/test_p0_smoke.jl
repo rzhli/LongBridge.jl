@@ -233,15 +233,17 @@ end
     @test _pinned_mode_str(PinnedMode.Add)    == "add"
     @test _pinned_mode_str(PinnedMode.Remove) == "remove"
 
-    # ShortPositionsResponse
+    # ShortPositionsResponse —— v0.8.0 改为不再含 symbol/sources 外层字段，
+    # 且 item 是 ShortPositionsItem，timestamp 现在是 DateTime (UTC)。
     sp = StructTypes.construct(ShortPositionsResponse, JSON3.read("""
         {"counter_id":"ST/US/TSLA","data":[
           {"timestamp":"1747257600","rate":"0.03","avg_daily_share_volume":"100000000",
-           "current_shares_short":"50000000","days_to_cover":"0.5","close":"350.5"}],
-         "sources":2}"""))
-    @test sp.symbol == "TSLA.US"
+           "current_shares_short":"50000000","days_to_cover":"0.5","close":"350.5"}]}"""))
     @test length(sp.data) == 1
-    @test sp.sources == 2
+    @test sp.data[1] isa ShortPositionsItem
+    @test sp.data[1].timestamp == unix2datetime(1747257600)
+    @test sp.data[1].rate == "0.03"
+    @test sp.data[1].current_shares_short == "50000000"
 
     # OptionVolumeStats
     ov = StructTypes.construct(OptionVolumeStats, JSON3.read("""{"c":"100000","p":"50000"}"""))
@@ -272,7 +274,18 @@ end
               :exchange_rate, :profit_analysis,
               :short_positions, :option_volume, :option_volume_daily, :update_pinned,
               :FinancialReportKind, :CalendarCategory, :BrokerHoldingPeriod, :PinnedMode,
-              :FlowDirection, :AssetType, :InstitutionRecommend)
+              :FlowDirection, :AssetType, :InstitutionRecommend,
+              # v0.8.0 additions (LongPort SDK v4.2.0)
+              :ScreenerContext, :screener_indicators, :screener_recommend_strategies,
+              :screener_user_strategies, :screener_strategy, :screener_search,
+              :short_trades, :ShortPositionsItem, :ShortTradesItem,
+              :top_movers, :rank_categories, :rank_list,
+              :TopMoversEvent, :TopMoversResponse, :RankListItem,
+              :business_segments, :business_segments_history,
+              :institution_rating_views, :industry_rank, :industry_peers,
+              :financial_report_snapshot, :shareholder_top, :shareholder_detail,
+              :valuation_comparison,
+              :FinancialReportSnapshot, :ValuationComparisonItem, :IndustryPeerNode)
         @test isdefined(LongBridge, s)
     end
 end

@@ -14,6 +14,9 @@ module MarketProtocol
            TradeStatistics, TradePriceLevel, TradeStatsResponse,
            AnomalyItem, AnomalyResponse,
            ConstituentStock, IndexConstituents,
+           TopMoversStock, TopMoversEvent, TopMoversResponse,
+           RankCategoriesResponse,
+           RankListItem, RankListResponse,
            _broker_holding_period_str, _ah_premium_period_line_type,
            _market_from_str
 
@@ -456,6 +459,152 @@ module MarketProtocol
             Int(get(obj, :rise_num, 0)),
             items,
         )
+    end
+
+    # ── top_movers ─────────────────────────────────────────────────────
+
+    """
+    `top_movers` 事件中的证券信息。`symbol` 由 `counter_id` 转换。
+    """
+    struct TopMoversStock
+        symbol::String
+        code::String
+        name::String
+        full_name::String
+        change::String
+        last_done::String
+        market::String
+        labels::Vector{String}
+        logo::String
+    end
+    StructTypes.StructType(::Type{TopMoversStock}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{TopMoversStock}, obj::JSON3.Object)
+        labels = if haskey(obj, :labels) && !isnothing(obj.labels)
+            String[String(l) for l in obj.labels]
+        else
+            String[]
+        end
+        TopMoversStock(
+            counter_id_to_symbol(String(get(obj, :counter_id, ""))),
+            String(get(obj, :code,      "")),
+            String(get(obj, :name,      "")),
+            String(get(obj, :full_name, "")),
+            String(get(obj, :change,    "")),
+            String(get(obj, :last_done, "")),
+            String(get(obj, :market,    "")),
+            labels,
+            String(get(obj, :logo, "")),
+        )
+    end
+
+    """
+    `top_movers` 事件单条记录。`timestamp` 从 unix 秒转 `DateTime` (UTC)。
+    """
+    struct TopMoversEvent
+        timestamp::DateTime
+        alert_reason::String
+        alert_type::Int64
+        stock::TopMoversStock
+        post::Any
+    end
+    StructTypes.StructType(::Type{TopMoversEvent}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{TopMoversEvent}, obj::JSON3.Object)
+        ts_raw = get(obj, :timestamp, 0)
+        ts_int = ts_raw isa AbstractString ? parse(Int64, ts_raw) : Int64(ts_raw)
+        stock_obj = get(obj, :stock, nothing)
+        stock = stock_obj === nothing ? TopMoversStock("", "", "", "", "", "", "", String[], "") :
+                                        StructTypes.construct(TopMoversStock, stock_obj)
+        TopMoversEvent(
+            unix2datetime(ts_int),
+            String(get(obj, :alert_reason, "")),
+            Int64(get(obj, :alert_type, 0)),
+            stock,
+            get(obj, :post, nothing),
+        )
+    end
+
+    struct TopMoversResponse
+        events::Vector{TopMoversEvent}
+        next_params::Any
+    end
+    StructTypes.StructType(::Type{TopMoversResponse}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{TopMoversResponse}, obj::JSON3.Object)
+        events = if haskey(obj, :events) && !isnothing(obj.events)
+            [StructTypes.construct(TopMoversEvent, x) for x in obj.events]
+        else
+            TopMoversEvent[]
+        end
+        TopMoversResponse(events, get(obj, :next_params, nothing))
+    end
+
+    # ── rank_categories ────────────────────────────────────────────────
+
+    """
+    排行榜分类元数据。结构因 API 演进而变，原样保留 JSON。
+    """
+    struct RankCategoriesResponse
+        data::Any
+    end
+    StructTypes.StructType(::Type{RankCategoriesResponse}) = StructTypes.CustomStruct()
+    StructTypes.construct(::Type{RankCategoriesResponse}, obj) = RankCategoriesResponse(obj)
+
+    # ── rank_list ──────────────────────────────────────────────────────
+
+    """
+    排行榜单条记录。`symbol` 由 `counter_id` 转换；数值字段保留 API 原字符串。
+    """
+    struct RankListItem
+        symbol::String
+        code::String
+        name::String
+        last_done::String
+        chg::String
+        change::String
+        inflow::String
+        market_cap::String
+        industry::String
+        pre_post_price::String
+        pre_post_chg::String
+        amplitude::String
+        five_day_chg::String
+        turnover_rate::String
+        volume_rate::String
+        pb_ttm::String
+    end
+    StructTypes.StructType(::Type{RankListItem}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{RankListItem}, obj::JSON3.Object)
+        RankListItem(
+            counter_id_to_symbol(String(get(obj, :counter_id, ""))),
+            String(get(obj, :code,            "")),
+            String(get(obj, :name,            "")),
+            String(get(obj, :last_done,       "")),
+            String(get(obj, :chg,             "")),
+            String(get(obj, :change,          "")),
+            String(get(obj, :inflow,          "")),
+            String(get(obj, :market_cap,      "")),
+            String(get(obj, :industry,        "")),
+            String(get(obj, :pre_post_price,  "")),
+            String(get(obj, :pre_post_chg,    "")),
+            String(get(obj, :amplitude,       "")),
+            String(get(obj, :five_day_chg,    "")),
+            String(get(obj, :turnover_rate,   "")),
+            String(get(obj, :volume_rate,     "")),
+            String(get(obj, :pb_ttm,          "")),
+        )
+    end
+
+    struct RankListResponse
+        bmp::Bool
+        lists::Vector{RankListItem}
+    end
+    StructTypes.StructType(::Type{RankListResponse}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{RankListResponse}, obj::JSON3.Object)
+        items = if haskey(obj, :lists) && !isnothing(obj.lists)
+            [StructTypes.construct(RankListItem, x) for x in obj.lists]
+        else
+            RankListItem[]
+        end
+        RankListResponse(Bool(get(obj, :bmp, false)), items)
     end
 
 end # module MarketProtocol

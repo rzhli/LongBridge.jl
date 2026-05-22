@@ -1031,53 +1031,146 @@ using StructTypes
 # ── short_positions ────────────────────────────────────────────────────
 
 """
-美股做空数据中的一条记录（FINRA 双月公布）。所有数值字段在原始 API 中均为字符串。
+做空数据中的一条记录（US 由 FINRA 双月公布；HK 由港交所公布）。
+美股字段：`current_shares_short`、`avg_daily_share_volume`、`days_to_cover`。
+港股字段：`amount`、`balance`、`cost`。共有字段：`timestamp`、`rate`、`close`。
+所有数值字段在原始 API 中均为字符串（保留原样以避免精度损失）。
 """
-struct ShortPosition
-    timestamp::String
+struct ShortPositionsItem
+    timestamp::DateTime               # 从 unix 秒转 DateTime (UTC)
     rate::String
-    avg_daily_share_volume::String
-    current_shares_short::String
-    days_to_cover::String
     close::String
+    # US
+    current_shares_short::String
+    avg_daily_share_volume::String
+    days_to_cover::String
+    # HK
+    amount::String
+    balance::String
+    cost::String
 end
-StructTypes.StructType(::Type{ShortPosition}) = StructTypes.Struct()
+StructTypes.StructType(::Type{ShortPositionsItem}) = StructTypes.CustomStruct()
+function StructTypes.construct(::Type{ShortPositionsItem}, obj::JSON3.Object)
+    ts_raw = get(obj, :timestamp, 0)
+    ts_int = ts_raw isa AbstractString ? parse(Int64, ts_raw) : Int64(ts_raw)
+    ShortPositionsItem(
+        unix2datetime(ts_int),
+        String(get(obj, :rate, "")),
+        String(get(obj, :close, "")),
+        String(get(obj, :current_shares_short,   "")),
+        String(get(obj, :avg_daily_share_volume, "")),
+        String(get(obj, :days_to_cover,          "")),
+        String(get(obj, :amount,  "")),
+        String(get(obj, :balance, "")),
+        String(get(obj, :cost,    "")),
+    )
+end
 
 struct ShortPositionsResponse
-    symbol::String
-    data::Vector{ShortPosition}
-    sources::Int
+    data::Vector{ShortPositionsItem}
 end
 StructTypes.StructType(::Type{ShortPositionsResponse}) = StructTypes.CustomStruct()
 function StructTypes.construct(::Type{ShortPositionsResponse}, obj::JSON3.Object)
     items = if haskey(obj, :data) && !isnothing(obj.data)
-        [JSON3.read(JSON3.write(x), ShortPosition) for x in obj.data]
+        [StructTypes.construct(ShortPositionsItem, x) for x in obj.data]
     else
-        ShortPosition[]
+        ShortPositionsItem[]
     end
-    ShortPositionsResponse(
-        counter_id_to_symbol(String(get(obj, :counter_id, ""))),
-        items,
-        Int(get(obj, :sources, 0)),
-    )
+    ShortPositionsResponse(items)
 end
 
 """
-    short_positions(ctx::QuoteContext, symbol) -> ShortPositionsResponse
+    short_positions(ctx::QuoteContext, symbol::AbstractString; count::Integer=20) -> ShortPositionsResponse
 
-美股做空数据（空头比例、平仓天数、空头股数）。固定 `last_timestamp=0, page_size=100`。
+做空数据，US/HK 通用——根据 `symbol` 后缀自动选择端点：
+- `.HK` → `GET /v1/quote/short-positions/hk`
+- 其它 → `GET /v1/quote/short-positions/us`
 
-端点：`GET /v1/quote/short-positions/us`
+`count` 为返回记录条数（1–100，默认 20）。
 """
-function short_positions(ctx::QuoteContext, symbol::AbstractString)
+function short_positions(ctx::QuoteContext, symbol::AbstractString; count::Integer=20)
+    sym  = String(symbol)
+    path = endswith(uppercase(sym), ".HK") ?
+        "/v1/quote/short-positions/hk" : "/v1/quote/short-positions/us"
+    ts   = string(round(Int64, datetime2unix(now(UTC))))
     params = Dict{String,Any}(
-        "counter_id"     => symbol_to_counter_id(symbol),
-        "last_timestamp" => 0,
-        "page_size"      => 100,
+        "counter_id"     => symbol_to_counter_id(sym),
+        "last_timestamp" => ts,
+        "count"          => Int(count),
     )
-    resp = Errors.ApiResponse(Client.http_get(ctx.inner.config, "/v1/quote/short-positions/us"; params))
+    resp = Errors.ApiResponse(Client.http_get(ctx.inner.config, path; params))
     resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
     StructTypes.construct(ShortPositionsResponse, resp.data)
+end
+
+# ── short_trades ───────────────────────────────────────────────────────
+
+"""
+做空成交数据中的一条记录。
+美股字段：`nus_amount`、`ny_amount`、`total_amount`。
+港股字段：`amount`、`balance`。共有字段：`timestamp`、`rate`、`close`。
+"""
+struct ShortTradesItem
+    timestamp::DateTime
+    rate::String
+    close::String
+    # US
+    nus_amount::String
+    ny_amount::String
+    total_amount::String
+    # HK
+    amount::String
+    balance::String
+end
+StructTypes.StructType(::Type{ShortTradesItem}) = StructTypes.CustomStruct()
+function StructTypes.construct(::Type{ShortTradesItem}, obj::JSON3.Object)
+    ts_raw = get(obj, :timestamp, 0)
+    ts_int = ts_raw isa AbstractString ? parse(Int64, ts_raw) : Int64(ts_raw)
+    ShortTradesItem(
+        unix2datetime(ts_int),
+        String(get(obj, :rate,  "")),
+        String(get(obj, :close, "")),
+        String(get(obj, :nus_amount,   "")),
+        String(get(obj, :ny_amount,    "")),
+        String(get(obj, :total_amount, "")),
+        String(get(obj, :amount,  "")),
+        String(get(obj, :balance, "")),
+    )
+end
+
+struct ShortTradesResponse
+    data::Vector{ShortTradesItem}
+end
+StructTypes.StructType(::Type{ShortTradesResponse}) = StructTypes.CustomStruct()
+function StructTypes.construct(::Type{ShortTradesResponse}, obj::JSON3.Object)
+    items = if haskey(obj, :data) && !isnothing(obj.data)
+        [StructTypes.construct(ShortTradesItem, x) for x in obj.data]
+    else
+        ShortTradesItem[]
+    end
+    ShortTradesResponse(items)
+end
+
+"""
+    short_trades(ctx::QuoteContext, symbol::AbstractString; count::Integer=20) -> ShortTradesResponse
+
+做空成交数据，US/HK 通用——根据 `symbol` 后缀自动选择端点：
+- `.HK` → `GET /v1/quote/short-trades/hk`
+- 其它 → `GET /v1/quote/short-trades/us`
+"""
+function short_trades(ctx::QuoteContext, symbol::AbstractString; count::Integer=20)
+    sym  = String(symbol)
+    path = endswith(uppercase(sym), ".HK") ?
+        "/v1/quote/short-trades/hk" : "/v1/quote/short-trades/us"
+    ts   = string(round(Int64, datetime2unix(now(UTC))))
+    params = Dict{String,Any}(
+        "counter_id"     => symbol_to_counter_id(sym),
+        "last_timestamp" => ts,
+        "page_size"      => string(Int(count)),
+    )
+    resp = Errors.ApiResponse(Client.http_get(ctx.inner.config, path; params))
+    resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    StructTypes.construct(ShortTradesResponse, resp.data)
 end
 
 # ── option_volume ──────────────────────────────────────────────────────
@@ -1202,10 +1295,11 @@ function update_pinned(ctx::QuoteContext, mode::PinnedMode.T, symbols::Vector{St
     return nothing
 end
 
-export ShortPosition, ShortPositionsResponse,
+export ShortPositionsItem, ShortPositionsResponse,
+       ShortTradesItem, ShortTradesResponse,
        OptionVolumeStats, OptionVolumeDailyStat, OptionVolumeDaily,
        PinnedMode,
-       short_positions, option_volume, option_volume_daily, update_pinned
+       short_positions, short_trades, option_volume, option_volume_daily, update_pinned
 
 # ── filings ────────────────────────────────────────────────────────────
 

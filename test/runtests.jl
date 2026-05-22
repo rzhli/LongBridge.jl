@@ -13,6 +13,9 @@ include("test_p1_smoke.jl")
 # v0.7.0 上游同步（Asset / filings / UserQuoteProfile / realtime_quote 重命名）
 include("test_v0_7_0_sync.jl")
 
+# v0.8.0 上游同步（Screener / short_* unify / top_movers / rank_list / 9 新 Fundamental APIs）
+include("test_v0_8_0_sync.jl")
+
 @testset "Config defaults" begin
     mktemp() do f, io
         write(io, """
