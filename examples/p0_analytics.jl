@@ -270,7 +270,11 @@ display(top_movers(mc, ["US"], 1, 20))                     # 异动榜（POST）
 # Screener：5 个新方法（全部返回原始 JSON，可用 .data 索引取字段）
 sc = ScreenerContext(cfg)
 display(screener_indicators(sc))                           # 可用指标列表
-# display(screener_recommend_strategies(sc))               # 推荐策略
-# display(screener_user_strategies(sc))                    # 我的策略
+# display(screener_recommend_strategies(sc, "US"))         # 推荐策略（v0.8.1 起需要 market）
+# display(screener_user_strategies(sc, "US"))              # 我的策略
 # display(screener_strategy(sc, 12345))                    # 单个策略详情
-# display(screener_search(sc, "US", 12345, 1, 20))         # 按策略筛选
+# display(screener_search(sc, "US"; strategy_id=12345, page=0, size=20))     # Mode A
+# Mode B：自定义条件
+# conds = [ScreenerCondition("pettm"; min="0", max="20"),
+#          ScreenerCondition("roe";   min="0.1")]
+# display(screener_search(sc, "US"; conditions=conds, page=0, size=20))

@@ -290,7 +290,8 @@ module LongBridge
     export ScreenerContext,
            screener_recommend_strategies, screener_user_strategies,
            screener_strategy, screener_search, screener_indicators
-    export ScreenerRecommendStrategiesResponse, ScreenerUserStrategiesResponse,
+    export ScreenerCondition,
+           ScreenerRecommendStrategiesResponse, ScreenerUserStrategiesResponse,
            ScreenerStrategyResponse, ScreenerSearchResponse, ScreenerIndicatorsResponse
 
     # ==================== Precompile workload ====================

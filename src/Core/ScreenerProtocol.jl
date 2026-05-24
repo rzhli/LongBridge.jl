@@ -2,7 +2,8 @@ module ScreenerProtocol
 
     using JSON3, StructTypes
 
-    export ScreenerRecommendStrategiesResponse,
+    export ScreenerCondition,
+           ScreenerRecommendStrategiesResponse,
            ScreenerUserStrategiesResponse,
            ScreenerStrategyResponse,
            ScreenerSearchResponse,
@@ -10,6 +11,27 @@ module ScreenerProtocol
 
     # 上游 5 个端点均返回结构多变的 JSON——这里统一保留原始 JSON 对象，
     # 由调用方按需取字段。后续若 API 稳定可再细化类型。
+
+    # ── screener_condition (v4.2.1 新增) ───────────────────────────
+
+    """
+        ScreenerCondition(key; min="", max="", tech_values=Dict())
+
+    `screener_search` Mode B 用的筛选条件。
+
+    - `key`：指标 key（不要带 `filter_` 前缀），如 `"pettm"`、`"roe"`、`"macd_day"`。
+    - `min` / `max`：区间边界，空字符串表示该边无限制。
+    - `tech_values`：技术指标参数（基本面指标传空 Dict 即可），如 `Dict("category"=>"goldenfork","period"=>"day")`。
+    """
+    Base.@kwdef struct ScreenerCondition
+        key::String
+        min::String = ""
+        max::String = ""
+        tech_values::Any = Dict{String,Any}()
+    end
+    ScreenerCondition(key::AbstractString; min::AbstractString="", max::AbstractString="",
+                      tech_values=Dict{String,Any}()) =
+        ScreenerCondition(String(key), String(min), String(max), tech_values)
 
     """
     `screener_recommend_strategies` 的原始 JSON 响应包装。

@@ -369,13 +369,14 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `statements(ctx, type::StatementType.T; page, page_size)`: Paginated list of statement records (`type` = `Daily` / `Monthly`)
 - `statement_download_url(ctx, file_key)`: Resolve a statement record's download URL
 
-### Stock Screener (`ScreenerContext`, new in v0.8.0)
+### Stock Screener (`ScreenerContext`, new in v0.8.0, signature update in v0.8.1)
 - `ScreenerContext(config)`: Create context (HTTP-only, no disconnect needed)
-- `screener_recommend_strategies(ctx)`: Recommended built-in screener strategies
-- `screener_user_strategies(ctx)`: Current user's saved screener strategies
-- `screener_strategy(ctx, id)`: Detail of one strategy
-- `screener_search(ctx, market, strategy_id, page, size)`: Run a strategy and page results
-- `screener_indicators(ctx)`: Available screener indicator definitions
+- `screener_recommend_strategies(ctx, market)`: Preset built-in screener strategies for a market (e.g. `"US"`/`"HK"`)
+- `screener_user_strategies(ctx, market)`: Current user's saved screener strategies for a market
+- `screener_strategy(ctx, id)`: Detail of one strategy (path-param id); `filter_` prefix is stripped from filter keys
+- `screener_search(ctx, market; strategy_id=nothing, conditions=ScreenerCondition[], show=String[], page=0, size=20)`:
+  Mode A (when `strategy_id` is given — fetches strategy and forwards filters) or Mode B (typed `ScreenerCondition` objects). `DEFAULT_RETURNS` always included; `filter_` prefix is stripped from response indicator keys.
+- `screener_indicators(ctx)`: Available indicator definitions; `filter_` prefix stripped + `tech_values` rebuilt from `tech_indicators`
 
 ### Fundamental (`FundamentalContext`, new in v0.8.0)
 - `business_segments(ctx, symbol)`: Latest business segment revenue breakdown

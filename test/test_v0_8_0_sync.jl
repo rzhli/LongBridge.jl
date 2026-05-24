@@ -227,9 +227,9 @@ end
     @test hasmethod(shareholder_top,             (FundamentalContext, String))
     @test hasmethod(shareholder_detail,          (FundamentalContext, String, Int))
     @test hasmethod(valuation_comparison,        (FundamentalContext, String, String))
-    @test hasmethod(screener_recommend_strategies, (ScreenerContext,))
-    @test hasmethod(screener_user_strategies,      (ScreenerContext,))
+    @test hasmethod(screener_recommend_strategies, (ScreenerContext, String))
+    @test hasmethod(screener_user_strategies,      (ScreenerContext, String))
     @test hasmethod(screener_strategy,             (ScreenerContext, Int))
-    @test hasmethod(screener_search, (ScreenerContext, String, Union{Int,Nothing}, Int, Int))
+    @test hasmethod(screener_search,               (ScreenerContext, String))
     @test hasmethod(screener_indicators,           (ScreenerContext,))
 end

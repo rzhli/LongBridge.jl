@@ -16,6 +16,9 @@ include("test_v0_7_0_sync.jl")
 # v0.8.0 上游同步（Screener / short_* unify / top_movers / rank_list / 9 新 Fundamental APIs）
 include("test_v0_8_0_sync.jl")
 
+# v0.8.1 上游同步（Screener v4.2.1 / OperatingFinancial.symbol / rank_list ib_ prefix）
+include("test_v0_8_1_sync.jl")
+
 @testset "Config defaults" begin
     mktemp() do f, io
         write(io, """

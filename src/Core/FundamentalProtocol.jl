@@ -1071,7 +1071,7 @@ module FundamentalProtocol
 
     struct OperatingFinancial
         code::String
-        counter_id::String
+        symbol::String                       # 由 counter_id 转换（如 ST/US/AAPL → AAPL.US）
         currency::String
         name::String
         region::String
@@ -1088,7 +1088,7 @@ module FundamentalProtocol
         end
         OperatingFinancial(
             String(get(obj, :code, "")),
-            String(get(obj, :counter_id, "")),
+            counter_id_to_symbol(String(get(obj, :counter_id, ""))),
             String(get(obj, :currency, "")),
             String(get(obj, :name, "")),
             String(get(obj, :region, "")),

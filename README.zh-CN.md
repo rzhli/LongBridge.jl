@@ -397,13 +397,14 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `statements(ctx, type::StatementType.T; page, page_size)`: 结算单分页列表（`type` 为 `Daily` / `Monthly`）
 - `statement_download_url(ctx, file_key)`: 用 `file_key` 换取结算单下载链接
 
-### 选股器（ScreenerContext，v0.8.0 新增）
+### 选股器（ScreenerContext，v0.8.0 新增；v0.8.1 签名更新）
 - `ScreenerContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
-- `screener_recommend_strategies(ctx)`: 推荐的内置选股策略
-- `screener_user_strategies(ctx)`: 当前账户已保存的策略列表
-- `screener_strategy(ctx, id)`: 按 ID 获取单个策略详情
-- `screener_search(ctx, market, strategy_id, page, size)`: 用策略筛选证券（分页）
-- `screener_indicators(ctx)`: 所有可用的筛选指标元数据
+- `screener_recommend_strategies(ctx, market)`: 指定市场（如 `"US"` / `"HK"`）的推荐内置策略
+- `screener_user_strategies(ctx, market)`: 指定市场已保存的策略列表
+- `screener_strategy(ctx, id)`: 单个策略详情（id 走 path 参数）；响应中 `filter_` 前缀自动剥离
+- `screener_search(ctx, market; strategy_id=nothing, conditions=ScreenerCondition[], show=String[], page=0, size=20)`:
+  Mode A（给 `strategy_id`，内部先拉策略再 POST）或 Mode B（用 `ScreenerCondition` 类型化条件）。`DEFAULT_RETURNS` 始终包含；响应中 `items[].indicators[].key` 的 `filter_` 前缀自动剥离。
+- `screener_indicators(ctx)`: 可用指标元数据；`filter_` 前缀剥离 + 由 `tech_indicators` 重组 `tech_values`
 
 ### 基本面（FundamentalContext，v0.8.0 新增）
 - `business_segments(ctx, symbol)`: 最新业务分部收入构成

@@ -5,6 +5,7 @@ module Utils
 
     export to_namedtuple, to_china_time, to_dataframe, safeparse, Arc,
            symbol_to_counter_id, index_symbol_to_counter_id, counter_id_to_symbol,
+           json3_to_mutable,
            Dec64
 
     # A simple wrapper to mimic Rust's Arc for shared ownership semantics
@@ -204,6 +205,22 @@ module Utils
         s = String(counter_id)
         parts = split(s, '/'; limit=3)
         length(parts) == 3 ? string(parts[3], '.', parts[2]) : s
+    end
+
+    """
+        json3_to_mutable(x) -> Any
+
+    递归地把 `JSON3.Object` / `JSON3.Array` 转成 `Dict{String,Any}` / `Vector{Any}`，
+    便于对原始响应做客户端后处理（如去 prefix、按字段重组）。其它类型原样返回。
+    """
+    function json3_to_mutable(x)
+        if x isa JSON3.Object
+            Dict{String,Any}(string(k) => json3_to_mutable(v) for (k, v) in pairs(x))
+        elseif x isa JSON3.Array
+            Any[json3_to_mutable(v) for v in x]
+        else
+            x
+        end
     end
 
 end

@@ -5,7 +5,7 @@ module MarketCtx
     using ..Config
     using ..Client
     using ..Errors
-    using ..Utils: symbol_to_counter_id, index_symbol_to_counter_id
+    using ..Utils: symbol_to_counter_id, index_symbol_to_counter_id, json3_to_mutable
     using ..MarketProtocol
 
     export MarketContext,
@@ -215,14 +215,31 @@ module MarketCtx
     """
         rank_categories(ctx::MarketContext) -> RankCategoriesResponse
 
-    可用的排行榜分类。响应结构因 API 演进而变，原样保留 JSON。
+    可用的排行榜分类。v0.8.1 起：`first_tags[].key` 与 `second_tags[].key`
+    的 `ib_` 前缀会被剥离，让用户拿到干净的 key 直接喂给 `rank_list`。
 
     端点：`GET /v1/quote/market/rank/categories`
     """
     function rank_categories(ctx::MarketContext)
         resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/market/rank/categories"))
         _check(resp)
-        StructTypes.construct(RankCategoriesResponse, resp.data)
+        data = json3_to_mutable(resp.data)
+        if data isa Dict && haskey(data, "first_tags") && data["first_tags"] isa Vector
+            for tag in data["first_tags"]
+                tag isa Dict || continue
+                if haskey(tag, "key") && tag["key"] isa AbstractString
+                    tag["key"] = replace(tag["key"], r"^ib_" => "")
+                end
+                if haskey(tag, "second_tags") && tag["second_tags"] isa Vector
+                    for sub in tag["second_tags"]
+                        if sub isa Dict && haskey(sub, "key") && sub["key"] isa AbstractString
+                            sub["key"] = replace(sub["key"], r"^ib_" => "")
+                        end
+                    end
+                end
+            end
+        end
+        RankCategoriesResponse(data)
     end
 
     # ── rank_list ──────────────────────────────────────────────────────
@@ -231,12 +248,15 @@ module MarketCtx
         rank_list(ctx::MarketContext, key::AbstractString; need_article::Bool=false) -> RankListResponse
 
     指定分类的排行榜列表。`key` 来自 `rank_categories`。
+    v0.8.1 起：若 `key` 缺少 `ib_` 前缀，自动补上（与上游一致，配合 `rank_categories` 的剥离后行为）。
 
     端点：`GET /v1/quote/market/rank/list`（固定 `delay_bmp=false`）
     """
     function rank_list(ctx::MarketContext, key::AbstractString; need_article::Bool=false)
+        k = String(key)
+        api_key = startswith(k, "ib_") ? k : string("ib_", k)
         params = Dict{String,Any}(
-            "key"          => String(key),
+            "key"          => api_key,
             "delay_bmp"    => "false",
             "need_article" => need_article ? "true" : "false",
         )

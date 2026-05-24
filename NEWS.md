@@ -2,6 +2,46 @@
 
 # Release Notes
 
+## v0.8.1 (2026-05-24)
+
+### Changes — 跟进上游 LongPort SDK v4.2.1
+
+- **`ScreenerContext` 端点全部迁移到 `/v1/quote/ai/screener/*`**：
+  - `screener_recommend_strategies(ctx, market)` —— 新增 `market` 必传参数。
+  - `screener_user_strategies(ctx, market)` —— 新增 `market` 必传参数。
+  - `screener_strategy(ctx, id)` —— 改为 `GET /v1/quote/ai/screener/strategy/{id}`（id 在 path）；响应中 `filter.filters[].key` 自动剥离 `filter_` 前缀。
+  - `screener_search(ctx, market; strategy_id=nothing, conditions=ScreenerCondition[], show=String[], page=0, size=20)` —— 重写为 Mode A（按 `strategy_id`，内部先拉策略再 POST）和 Mode B（用 `ScreenerCondition` 列表）。`DEFAULT_RETURNS`（7 列）始终包含，`show` 列追加。响应中 `items[].indicators[].key` 自动剥离 `filter_` 前缀。`page` 从 0 开始。
+  - `screener_indicators(ctx)` —— 响应做两个后处理：`groups[].indicators[].key` 的 `filter_` 前缀剥离 + 由 `tech_indicators` 重组出 `tech_values = {tech_key => [{value, label}]}`。
+- **新增 `ScreenerCondition` 结构** —— Mode B 用的类型化筛选条件（`key`、`min`、`max`、`tech_values`），替代上游旧版的字符串拼接。
+- **`MarketContext` 排行榜接口前缀处理**：
+  - `rank_categories` 响应中 `first_tags[].key` / `second_tags[].key` 的 `ib_` 前缀自动剥离。
+  - `rank_list(ctx, key; ...)` 若 `key` 缺少 `ib_` 前缀会自动补上——配合 `rank_categories` 剥离后的干净 key 直接使用。
+- **`OperatingFinancial.counter_id` → `OperatingFinancial.symbol`**：字段重命名 + 应用 `counter_id_to_symbol` 转换（如 `ST/US/AAPL` → `AAPL.US`）。
+
+### Migration
+
+```julia
+# 旧（v0.8.0）
+screener_recommend_strategies(sc)
+screener_search(sc, "US", strategy_id, page, size)
+of.counter_id   # "ST/US/AAPL"
+
+# 新（v0.8.1）
+screener_recommend_strategies(sc, "US")
+screener_search(sc, "US"; strategy_id=12345, page=0, size=20)         # Mode A
+screener_search(sc, "US"; conditions=[ScreenerCondition("pettm"; min="0", max="20")])  # Mode B
+of.symbol       # "AAPL.US"
+```
+
+### Internals
+
+- 新增 `Utils.json3_to_mutable`：递归把 `JSON3.Object`/`JSON3.Array` 转 `Dict{String,Any}`/`Vector{Any}`，供需要客户端后处理的端点使用。
+- `test/test_v0_8_1_sync.jl`（9 个 testset，覆盖 `ScreenerCondition`、前缀剥离/补齐、`OperatingFinancial.symbol`、`json3_to_mutable`）。
+
+### Reference
+
+上游对应版本：[longbridge/openapi v4.2.1](https://github.com/longbridge/openapi/releases/tag/v4.2.1)（2026-05-23 发布）。
+
 ## v0.8.0 (2026-05-22)
 
 ### New Features — 跟进上游 LongPort SDK v4.2.0（19 个新 API + 1 个新 Context）
