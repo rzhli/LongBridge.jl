@@ -28,6 +28,9 @@ module Calendar
     - `start`, `end_`: 起止日期（含）
     - `market`: 可选，按市场过滤（如 `"HK"`、`"US"`、`"CN"`）
 
+    返回的 `CalendarEventsResponse.next_date` 是下一页游标；继续请求时可将它作为
+    `start`，并保持同一个 `end_`。
+
     # 端点
     `GET /v1/quote/finance_calendar`
     """

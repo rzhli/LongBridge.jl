@@ -123,8 +123,7 @@ module LongBridge
     # K线订阅
     export subscribe_candlesticks, unsubscribe_candlesticks
     # 期权
-    export option_quote, option_chain_expiry_date_list, option_chain_info_by_date,
-           option_chain_dates, option_chain_strikes
+    export option_quote, option_chain_expiry_date_list, option_chain_info_by_date
     # 窝轮
     export warrant_quote, warrant_list, warrant_issuers, warrant_filter
     # 市场信息

@@ -64,7 +64,7 @@ end
     @test _calendar_category_str(CalendarCategory.Merge)     == "merge"
 
     raw = """
-    {"date":"2026-05-15","list":[{"date":"2026-05-15","count":1,"infos":[
+    {"date":"2026-05-15","next_date":"2026-05-16","list":[{"date":"2026-05-15","count":1,"infos":[
       {"counter_id":"ST/HK/700","market":"HK","content":"Q1 财报","counter_name":"腾讯",
        "date":"2026.05.15","data_kv":[{"key":"EPS","value":"3.21","type":"estimate_eps","value_raw":"3.21"}],
        "type":"financial","datetime":"1747257600","star":3,"id":"evt-1","live":null,"ext":null}
@@ -72,6 +72,7 @@ end
     """
     resp = StructTypes.construct(CalendarEventsResponse, JSON3.read(raw))
     @test resp.date == "2026-05-15"
+    @test resp.next_date == "2026-05-16"
     @test length(resp.list[1].infos) == 1
     info = resp.list[1].infos[1]
     @test info.symbol == "700.HK"
@@ -80,6 +81,7 @@ end
 
     # 空响应
     empty_resp = StructTypes.construct(CalendarEventsResponse, JSON3.read("""{"date":"x","list":[]}"""))
+    @test empty_resp.next_date == ""
     @test isempty(empty_resp.list)
 end
 

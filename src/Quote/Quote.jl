@@ -42,7 +42,7 @@ export QuoteContext,
        set_on_quote, set_on_depth, set_on_brokers, set_on_trades, set_on_candlestick,
 
        option_quote, warrant_quote, participants, subscriptions,
-       option_chain_dates, option_chain_strikes, warrant_issuers, warrant_list,
+       warrant_issuers, warrant_list,
        trading_session, trading_days, capital_flow, capital_distribution,
        calc_indexes, member_id, quote_level, quote_package_details, filings,
        option_chain_expiry_date_list,
@@ -607,21 +607,6 @@ function option_chain_info_by_date(ctx::QuoteContext, symbol::String, expiry_dat
     cmd = GenericRequestCmd(QuoteCommand.QueryOptionChainDateStrikeInfo, req, OptionChainDateStrikeInfoResponse, Channel(1))
     resp = request(ctx, cmd)
     return to_namedtuple(resp.strike_price_info)
-end
-
-# --- Additional Market Data Endpoints ---
-
-function option_chain_dates(ctx::QuoteContext, symbol::String)
-    """Get option chain expiry dates for a symbol"""
-    cmd = HttpGetCmd("/v1/quote/option-chain-dates", Dict{String, Any}("symbol" => symbol), Channel(1))
-    return request(ctx, cmd)
-end
-
-function option_chain_strikes(ctx::QuoteContext, symbol::String, expiry_date::String)
-    """Get option chain strike prices for a symbol and expiry date"""
-    cmd = HttpGetCmd("/v1/quote/option-chain-strikes", 
-        Dict{String, Any}("symbol" => symbol, "expiry_date" => expiry_date), Channel(1))
-    return request(ctx, cmd)
 end
 
 function warrant_issuers(ctx::QuoteContext)

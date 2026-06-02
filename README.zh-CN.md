@@ -326,6 +326,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 ### 财务日历（CalendarContext，v0.6.0 新增）
 - `CalendarContext(config)`: 创建上下文
 - `finance_calendar(ctx, category, start, end_; market)`: 财务日历事件
+  - `CalendarEventsResponse.next_date`: 下一页游标，可作为下一次请求的 `start`，并保持同一个 `end_`
   - `CalendarCategory`: `Report` / `Dividend` / `Split` / `Ipo` / `MacroData` / `Closed` / `Meeting` / `Merge`
 
 ### 组合分析（PortfolioContext，v0.6.0 新增）

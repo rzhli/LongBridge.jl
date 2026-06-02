@@ -17,7 +17,17 @@ export WSClient, refresh_token, post, put, delete
 # HTTP Client Constants
 const DEFAULT_TIMEOUT = (connect=10, read=20, write=20)
 const RETRIES = 3
-const POOL = HTTP.Pool(20)
+const HTTP_TRANSPORT = HTTP.Transport(
+    max_idle_per_host = 20,
+    max_idle_total = 20,
+    max_conns_per_host = 20,
+)
+const HTTP_CLIENT = HTTP.Client(
+    transport = HTTP_TRANSPORT,
+    connect_timeout = DEFAULT_TIMEOUT.connect,
+    read_idle_timeout = DEFAULT_TIMEOUT.read,
+    write_idle_timeout = DEFAULT_TIMEOUT.write,
+)
 # WebSocket Client Constants (参考 Rust 实现)
 const REQUEST_TIMEOUT = 30.0  # seconds
 
@@ -133,16 +143,16 @@ function _http_request(config::Config.Settings, method::String, path::String;
         end
 
         if method == "GET"
-            return HTTP.get(full_url; headers, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
+            return HTTP.get(full_url; headers, client=HTTP_CLIENT, retries=RETRIES)
         elseif method == "DELETE"
             # DELETE 可带 body（Alert/Sharelist 等接口需要）
             kw = isnothing(body) ?
-                (; headers, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES) :
-                (; headers, body=body_str, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
+                (; headers, client=HTTP_CLIENT, retries=RETRIES) :
+                (; headers, body=body_str, client=HTTP_CLIENT, retries=RETRIES)
             return HTTP.delete(full_url; kw...)
         else
             http_fn = method == "POST" ? HTTP.post : HTTP.put
-            return http_fn(full_url; headers, body=body_str, pool=POOL, readtimeout=DEFAULT_TIMEOUT.read, retries=RETRIES)
+            return http_fn(full_url; headers, body=body_str, client=HTTP_CLIENT, retries=RETRIES)
         end
     catch e
         @error "HTTP $method 请求异常" path=path exception=(e, catch_backtrace())
@@ -292,22 +302,34 @@ function connect!(client::WSClient)
 
     # Reset auth signal in case this is a reconnect
     client.auth_event = Threads.Event()
+    connect_error = Ref{Any}(nothing)
 
     # 创建WebSocket连接
     ws_task = @async begin
-        WebSockets.open(full_url; nagle=false, quickack=true) do ws
-            client.ws = ws
-            client.seq_id = UInt32(1)
+        try
+            WebSockets.open(
+                full_url;
+                connect_timeout = DEFAULT_TIMEOUT.connect,
+                read_idle_timeout = DEFAULT_TIMEOUT.read,
+                write_idle_timeout = DEFAULT_TIMEOUT.write,
+            ) do ws
+                client.ws = ws
+                client.seq_id = UInt32(1)
 
-            send_request_packet(client, COMMAND_CODE_AUTH, client.auth_data)
+                send_request_packet(client, COMMAND_CODE_AUTH, client.auth_data)
 
-            # 启动消息处理循环
-            start_message_loop(client)
+                # 启动消息处理循环
+                start_message_loop(client)
 
-            # 保持连接开放，直到被外部关闭
-            while !isnothing(client.ws) && isopen(client.ws.io)
-                sleep(0.1)
+                # 保持连接开放，直到被外部关闭
+                while _ws_is_open(client.ws)
+                    sleep(0.1)
+                end
             end
+        catch e
+            connect_error[] = (e, catch_backtrace())
+            client.connected = false
+            notify(client.auth_event)
         end
     end
 
@@ -321,10 +343,19 @@ function connect!(client::WSClient)
         close(timer)
     end
 
+    if !isnothing(connect_error[])
+        err, bt = connect_error[]
+        @error "WebSocket连接任务异常" exception=(err, bt)
+        throw(err)
+    end
+
     if !client.connected
         @lperror(408, "WebSocket连接或认证超时")
     end
 end
+
+_ws_is_open(ws::Nothing) = false
+_ws_is_open(ws::WebSockets.WebSocket) = !WebSockets.isclosed(ws)
 
 """
 disconnect!(client::WSClient)
@@ -332,7 +363,7 @@ disconnect!(client::WSClient)
 断开 WebSocket 连接。
 """
 function disconnect!(client::WSClient)
-    if !client.connected
+    if !client.connected && isnothing(client.ws)
         return
     end
     client.connected = false
@@ -349,7 +380,7 @@ function disconnect!(client::WSClient)
         client.reconnect_task = nothing
     end
 
-    if !isnothing(client.ws) && isopen(client.ws.io)
+    if _ws_is_open(client.ws)
         try
             WebSockets.close(client.ws)
         catch e
@@ -369,7 +400,7 @@ send_request_packet(client::WSClient, cmd::UInt8, body::Vector{UInt8})
 根据Longport协议格式: [header(1)] + [cmd_code(1)] + [request_id(4)] + [timeout(2)] + [body_len(3)] + [body]
 """
 function send_request_packet(client::WSClient, cmd::UInt8, body::Vector{UInt8})
-    if isnothing(client.ws) || !isopen(client.ws.io)
+    if !_ws_is_open(client.ws)
         throw(ArgumentError("WebSocket物理连接不存在"))
     end
 
@@ -410,7 +441,7 @@ function start_heartbeat_loop(client::WSClient)
     client.heartbeat_task = @async begin
         try
             @info "启动心跳循环"
-            while client.connected && !isnothing(client.ws) && isopen(client.ws.io)
+            while client.connected && _ws_is_open(client.ws)
                 sleep(30) # Send a ping every 30 seconds
                 
                 try
@@ -607,7 +638,12 @@ function reconnect!(client::WSClient)
     @info "尝试使用 session_id 进行快速重连..."
     try
         # 1. 物理连接
-        WebSockets.open(client.url; nagle = false, quickack = true) do ws
+        WebSockets.open(
+            client.url;
+            connect_timeout = DEFAULT_TIMEOUT.connect,
+            read_idle_timeout = DEFAULT_TIMEOUT.read,
+            write_idle_timeout = DEFAULT_TIMEOUT.write,
+        ) do ws
             client.ws = ws
             
             # 2. 发送 ReconnectRequest
@@ -709,7 +745,7 @@ function ws_request(
     if !client.connected
         throw(ArgumentError("WebSocket客户端未连接"))
     end
-    if isnothing(client.ws) || !isopen(client.ws.io)
+    if !_ws_is_open(client.ws)
         throw(ArgumentError("WebSocket物理连接不存在"))
     end
 

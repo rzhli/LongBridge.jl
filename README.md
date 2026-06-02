@@ -315,6 +315,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 
 ### Calendar (`CalendarContext`, new in v0.6.0)
 - `finance_calendar(ctx, category, start, end_; market)`: Financial calendar events
+  - `CalendarEventsResponse.next_date`: pass as the next `start` with the same `end_` to fetch the next page
   - `CalendarCategory`: `Report` / `Dividend` / `Split` / `Ipo` / `MacroData` / `Closed` / `Meeting` / `Merge`
 
 ### Portfolio Analytics (`PortfolioContext`, new in v0.6.0)

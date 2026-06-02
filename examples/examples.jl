@@ -87,10 +87,6 @@ end
 ### 获取标的的期权链到期日期权标的列表 (返回空值，需开通OPRA美股期权行情权限？)
 @time info = option_chain_info_by_date(ctx, "AAPL.US", Date(2026, 8, 21))
 
-### 期权链 REST 辅助方法（与上面 WS 版本互补）
-@time resp = option_chain_dates(ctx, "AAPL.US")
-@time resp = option_chain_strikes(ctx, "AAPL.US", "2026-08-21")
-
 ### 获取轮证发行商ID （DataFrame）
 @time resp = warrant_issuers(ctx)
 
@@ -460,6 +456,5 @@ if !isempty(sl.list)
     @time url = statement_download_url(asset_ctx, sl.list[1].file_key)
     println(url.url)
 end
-
 
 disconnect!(ctx)

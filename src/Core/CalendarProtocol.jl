@@ -121,6 +121,7 @@ module CalendarProtocol
 
     struct CalendarEventsResponse
         date::String
+        next_date::String
         list::Vector{CalendarDateGroup}
     end
     StructTypes.StructType(::Type{CalendarEventsResponse}) = StructTypes.CustomStruct()
@@ -130,7 +131,11 @@ module CalendarProtocol
         else
             CalendarDateGroup[]
         end
-        CalendarEventsResponse(String(get(obj, :date, "")), groups)
+        CalendarEventsResponse(
+            String(get(obj, :date, "")),
+            String(get(obj, :next_date, "")),
+            groups,
+        )
     end
 
 end # module CalendarProtocol

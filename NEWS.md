@@ -1,6 +1,10 @@
 # Release Notes
 
-# Release Notes
+## v0.8.2 (2026-06-02)
+
+- **`CalendarEventsResponse.next_date`**：新增财务日历分页游标，可作为下一次 `finance_calendar` 请求的 `start`，并保持同一个 `end_`。
+- **`CalendarEventInfo.symbol`**：确认继续输出标准 symbol（如 `CRM.US`），而不是原始 `counter_id`（如 `ST/US/CRM`）。
+- **HTTP.jl 2.x 兼容**：HTTP 客户端和 OAuth 回调响应适配 HTTP.jl 2.x API。
 
 ## v0.8.1 (2026-05-24)
 

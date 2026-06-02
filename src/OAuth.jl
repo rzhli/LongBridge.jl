@@ -19,6 +19,12 @@ const DEFAULT_CALLBACK_PORT = UInt16(60355)
 const DEFAULT_REDIRECT_URI = "http://localhost:60355/callback"
 const TOKEN_DIR = joinpath(pkgdir(parentmodule(@__MODULE__)), ".tokens")
 const AUTH_TIMEOUT = 300.0  # 5 minutes
+const OAUTH_HTTP_CLIENT = HTTP.Client(
+    connect_timeout = 10,
+    request_timeout = 60,
+    response_header_timeout = 10,
+    read_idle_timeout = 30,
+)
 
 # ==================== OAuthToken ====================
 
@@ -160,6 +166,7 @@ function refresh_token!(handle::OAuthHandle)
 
     resp = HTTP.post(
         OAUTH_BASE_URL * OAUTH_TOKEN_PATH;
+        client = OAUTH_HTTP_CLIENT,
         headers = ["Content-Type" => "application/x-www-form-urlencoded"],
         body = HTTP.URIs.escapeuri(Dict(
             "grant_type" => "refresh_token",
@@ -225,23 +232,23 @@ function authorize!(handle::OAuthHandle, open_url_fn::Function)
 
             if !isempty(err)
                 isopen(result_ch) && put!(result_ch, (:err, err))
-                return HTTP.Response(200, "Authorization failed: $err. You can close this window.")
+                return HTTP.Response(200; body = "Authorization failed: $err. You can close this window.")
             end
 
             if state != csrf_state
                 isopen(result_ch) && put!(result_ch, (:err, "CSRF state mismatch"))
-                return HTTP.Response(400, "CSRF state mismatch. Please try again.")
+                return HTTP.Response(400; body = "CSRF state mismatch. Please try again.")
             end
 
             if isempty(code)
                 isopen(result_ch) && put!(result_ch, (:err, "No authorization code received"))
-                return HTTP.Response(400, "No authorization code received.")
+                return HTTP.Response(400; body = "No authorization code received.")
             end
 
             isopen(result_ch) && put!(result_ch, (:ok, code))
-            return HTTP.Response(200, "Authorization successful! You can close this window.")
+            return HTTP.Response(200; body = "Authorization successful! You can close this window.")
         end
-        return HTTP.Response(404, "Not Found")
+        return HTTP.Response(404; body = "Not Found")
     end
 
     try
@@ -268,6 +275,7 @@ function authorize!(handle::OAuthHandle, open_url_fn::Function)
         # Exchange code for token
         resp = HTTP.post(
             OAUTH_BASE_URL * OAUTH_TOKEN_PATH;
+            client = OAUTH_HTTP_CLIENT,
             headers = ["Content-Type" => "application/x-www-form-urlencoded"],
             body = HTTP.URIs.escapeuri(Dict(
                 "grant_type" => "authorization_code",

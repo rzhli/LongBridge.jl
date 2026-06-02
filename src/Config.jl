@@ -117,7 +117,15 @@ module Config
                 "expired_at" => raw_dt
             )
             try
-                resp = HTTP.get(url; headers = headers, query = query_param)
+                resp = HTTP.get(
+                    url;
+                    headers = headers,
+                    query = query_param,
+                    connect_timeout = 10,
+                    request_timeout = 60,
+                    response_header_timeout = 10,
+                    read_idle_timeout = 30,
+                )
                 data = JSON3.read(String(resp.body))
                 if data.code == 0
                     access_token = data.data.token
