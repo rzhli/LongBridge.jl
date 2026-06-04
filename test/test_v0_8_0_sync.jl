@@ -211,6 +211,32 @@ end
     @test it.history[1].date == unix2datetime(1747257600)
 end
 
+@testset "ETF AssetAllocationResponse" begin
+    raw = """
+    {"info":[
+      {"report_date":"20260601","asset_type":1,
+       "lists":[
+         {"name":"NVIDIA","code":"NVDA","position_ratio":"0.0861114",
+          "counter_id":"ST/US/NVDA",
+          "name_locales_map":{"zh-CN":"英伟达","en":"NVIDIA"},
+          "holding_detail":{"industry_id":"571010","industry_name":"Semiconductors",
+                            "index":"BK/US/CP99000","index_name":"Technology",
+                            "holding_type":"E","holding_type_name":"Stock"}}]},
+      {"report_date":"20260601","asset_type":2,
+       "lists":[{"name":"United States","position_ratio":"0.95",
+                 "name_locales_map":{"zh-CN":"美国"}}]}]}
+    """
+    r = StructTypes.construct(AssetAllocationResponse, JSON3.read(raw))
+    @test length(r.info) == 2
+    @test r.info[1].asset_type === ElementType.Holdings
+    @test r.info[2].asset_type === ElementType.Regional
+    item = r.info[1].lists[1]
+    @test item.symbol == "NVDA.US"
+    @test item.name_locales["zh-CN"] == "英伟达"
+    @test !isnothing(item.holding_detail)
+    @test item.holding_detail.holding_type == "E"
+end
+
 # ── method signatures ─────────────────────────────────────────────────────
 
 @testset "Method signatures present" begin
@@ -218,6 +244,8 @@ end
     @test hasmethod(short_trades,    (QuoteContext, String))
     @test hasmethod(top_movers,      (MarketContext, Vector{String}, Int, Int))
     @test hasmethod(rank_list,       (MarketContext, String))
+    @test hasmethod(symbol_to_counter_ids, (QuoteContext, Vector{String}))
+    @test hasmethod(resolve_counter_ids,   (QuoteContext, Vector{String}))
     @test hasmethod(business_segments,           (FundamentalContext, String))
     @test hasmethod(business_segments_history,   (FundamentalContext, String))
     @test hasmethod(institution_rating_views,    (FundamentalContext, String))
@@ -227,6 +255,7 @@ end
     @test hasmethod(shareholder_top,             (FundamentalContext, String))
     @test hasmethod(shareholder_detail,          (FundamentalContext, String, Int))
     @test hasmethod(valuation_comparison,        (FundamentalContext, String, String))
+    @test hasmethod(etf_asset_allocation,        (FundamentalContext, String))
     @test hasmethod(screener_recommend_strategies, (ScreenerContext, String))
     @test hasmethod(screener_user_strategies,      (ScreenerContext, String))
     @test hasmethod(screener_strategy,             (ScreenerContext, Int))

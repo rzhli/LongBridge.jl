@@ -27,7 +27,9 @@ using ..Cache: SimpleCache, CacheWithKey, get_or_update, RealtimeStore,
                update_quote!, update_depth!, update_brokers!, update_trades!,
                get_quote, get_depth, get_brokers, get_trades, get_candlesticks,
                update_candlesticks!, clear_candlesticks!
-using ..Utils: to_namedtuple, to_china_time, Arc, symbol_to_counter_id, counter_id_to_symbol
+using ..Utils: to_namedtuple, to_china_time, Arc,
+               symbol_to_counter_id, counter_id_to_symbol,
+               lookup_counter_id, cache_counter_ids
 using ..QuoteProtocol: PushQuote, PushDepth, PushBrokers, Trade, Candlestick
 
 using ..Errors
@@ -48,7 +50,7 @@ export QuoteContext,
        option_chain_expiry_date_list,
        market_temperature, history_market_temperature,
        watchlist, create_watchlist_group, delete_watchlist_group, update_watchlist_group,
-       security_list,
+       security_list, symbol_to_counter_ids, resolve_counter_ids,
        # Realtime cache methods
        realtime_depth, realtime_brokers, realtime_trades, realtime_candlesticks,
        subscribe_candlesticks, unsubscribe_candlesticks,
@@ -1331,6 +1333,68 @@ function filings(ctx::QuoteContext, symbol::AbstractString)
     resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
     items_obj = haskey(resp.data, :items) ? resp.data.items : ()
     return [StructTypes.construct(FilingItem, x) for x in items_obj]
+end
+
+# ── symbol_to_counter_ids / resolve_counter_ids ─────────────────────
+
+function _string_dict(obj)
+    d = Dict{String,String}()
+    if obj isa JSON3.Object
+        for (k, v) in pairs(obj)
+            d[String(k)] = isnothing(v) ? "" : String(v)
+        end
+    elseif obj isa AbstractDict
+        for (k, v) in obj
+            d[String(k)] = isnothing(v) ? "" : String(v)
+        end
+    end
+    d
+end
+
+"""
+    symbol_to_counter_ids(ctx::QuoteContext, symbols) -> Dict{String,String}
+
+Batch convert symbols to counter IDs via `POST /v1/quote/symbol-to-counter-ids`.
+Symbols not recognized by the backend are omitted from the returned dictionary.
+"""
+function symbol_to_counter_ids(ctx::QuoteContext, symbols::AbstractVector{<:AbstractString})
+    isempty(symbols) && return Dict{String,String}()
+    body = Dict{String,Any}("ticker_regions" => String[String(s) for s in symbols])
+    resp = Errors.ApiResponse(Client.http_post(ctx.inner.config, "/v1/quote/symbol-to-counter-ids"; body))
+    resp.code == 0 || @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    return _string_dict(get(resp.data, :list, nothing))
+end
+
+"""
+    resolve_counter_ids(ctx::QuoteContext, symbols) -> Dict{String,String}
+
+Resolve symbols local-first using embedded ETF/index/warrant directories and
+the local counter cache. Unknown symbols are resolved in one remote batch and
+the returned counter IDs are cached for future local lookups. Symbols still
+unknown after the remote call fall back to the default `ST/...` conversion.
+"""
+function resolve_counter_ids(ctx::QuoteContext, symbols::AbstractVector{<:AbstractString})
+    result = Dict{String,String}()
+    unknown = String[]
+    for sym in symbols
+        symbol = String(sym)
+        cid = lookup_counter_id(symbol)
+        if isnothing(cid)
+            push!(unknown, symbol)
+        else
+            result[symbol] = cid
+        end
+    end
+
+    if !isempty(unknown)
+        resolved = symbol_to_counter_ids(ctx, unknown)
+        cache_counter_ids(values(resolved))
+        for symbol in unknown
+            result[symbol] = get(resolved, symbol, symbol_to_counter_id(symbol))
+        end
+    end
+
+    return result
 end
 
 end # module Quote

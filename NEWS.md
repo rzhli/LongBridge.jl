@@ -1,5 +1,14 @@
 # Release Notes
 
+## v0.8.3 (2026-06-04)
+
+### Changes — 跟进上游 LongBridge OpenAPI v4.3.0
+
+- **`FundamentalContext.etf_asset_allocation(ctx, symbol)`**：新增 ETF 资产配置接口，对应 `GET /v1/quote/etf-asset-allocation`，返回 `AssetAllocationResponse`（holdings / regional / asset class / industry 分组）。
+- **`QuoteContext.symbol_to_counter_ids(ctx, symbols)` / `resolve_counter_ids(ctx, symbols)`**：新增批量 symbol → counter_id 解析；`resolve_counter_ids` 本地目录优先，未知 symbol 批量请求远端并写入本地 counter cache。
+- **`symbol_to_counter_id`**：同步上游 counter 目录逻辑，除 ETF 外也识别指数和窝轮；`.DJI.US` → `IX/US/.DJI`、`HSI.HK` → `IX/HK/HSI`、`10005.HK` → `WT/HK/10005`，并对纯数字港股代码去前导零。
+- **内嵌 counter 目录刷新**：US ETF 列表 `4574 → 7250` 条，新增 index `648` 条和 warrant `17693` 条。
+
 ## v0.8.2 (2026-06-02)
 
 - **`CalendarEventsResponse.next_date`**：新增财务日历分页游标，可作为下一次 `finance_calendar` 请求的 `start`，并保持同一个 `end_`。

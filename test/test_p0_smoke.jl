@@ -1,7 +1,8 @@
 using Test
 using LongBridge
 using LongBridge.Utils: Dec64, symbol_to_counter_id, index_symbol_to_counter_id,
-                       counter_id_to_symbol, _parse_optional_decimal, safeparse
+                       counter_id_to_symbol, lookup_counter_id, is_etf,
+                       _parse_optional_decimal, safeparse
 using JSON3, StructTypes, Dates
 
 # =========================================================================
@@ -28,13 +29,29 @@ end
 @testset "symbol ↔ counter_id" begin
     @test symbol_to_counter_id("TSLA.US") == "ST/US/TSLA"
     @test symbol_to_counter_id("700.HK")  == "ST/HK/700"
+    @test symbol_to_counter_id("00700.HK") == "ST/HK/700"
+    @test symbol_to_counter_id("09988.HK") == "ST/HK/9988"
+    @test symbol_to_counter_id("000001.SZ") == "ST/SZ/000001"
     @test symbol_to_counter_id("SPY.US")  == "ETF/US/SPY"
+    @test symbol_to_counter_id("DRAM.US") == "ETF/US/DRAM"
+    @test symbol_to_counter_id("HSI.HK") == "IX/HK/HSI"
+    @test symbol_to_counter_id(".DJI.US") == "IX/US/.DJI"
+    @test symbol_to_counter_id("10005.HK") == "WT/HK/10005"
     @test symbol_to_counter_id("NOSYMBOL") == "NOSYMBOL"
     @test index_symbol_to_counter_id("HSI.HK") == "IX/HK/HSI"
     @test counter_id_to_symbol("ST/US/TSLA") == "TSLA.US"
     @test counter_id_to_symbol("ETF/US/SPY") == "SPY.US"
     @test counter_id_to_symbol("IX/HK/HSI")  == "HSI.HK"
+    @test counter_id_to_symbol("IX/US/.DJI") == ".DJI.US"
+    @test counter_id_to_symbol("WT/HK/10005") == "10005.HK"
     @test counter_id_to_symbol("noslash")    == "noslash"
+    @test lookup_counter_id("QQQ.US") == "ETF/US/QQQ"
+    @test lookup_counter_id("HSI.HK") == "IX/HK/HSI"
+    @test lookup_counter_id("TSLA.US") === nothing
+    @test is_etf("SPY.US")
+    @test is_etf("DRAM.US")
+    @test !is_etf("TSLA.US")
+    @test !is_etf("HSI.HK")
 end
 
 @testset "Decimal parsing" begin
@@ -283,11 +300,14 @@ end
               :short_trades, :ShortPositionsItem, :ShortTradesItem,
               :top_movers, :rank_categories, :rank_list,
               :TopMoversEvent, :TopMoversResponse, :RankListItem,
+              :symbol_to_counter_ids, :resolve_counter_ids,
               :business_segments, :business_segments_history,
               :institution_rating_views, :industry_rank, :industry_peers,
               :financial_report_snapshot, :shareholder_top, :shareholder_detail,
-              :valuation_comparison,
-              :FinancialReportSnapshot, :ValuationComparisonItem, :IndustryPeerNode)
+              :valuation_comparison, :etf_asset_allocation,
+              :FinancialReportSnapshot, :ValuationComparisonItem, :IndustryPeerNode,
+              :ElementType, :AssetAllocationResponse, :AssetAllocationGroup,
+              :AssetAllocationItem, :HoldingDetail)
         @test isdefined(LongBridge, s)
     end
 end

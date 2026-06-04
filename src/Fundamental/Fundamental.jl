@@ -19,7 +19,8 @@ module Fundamental
            industry_rank, industry_peers,
            financial_report_snapshot,
            shareholder_top, shareholder_detail,
-           valuation_comparison
+           valuation_comparison,
+           etf_asset_allocation
 
     """
         FundamentalContext(config::Config.Settings)
@@ -575,6 +576,22 @@ module Fundamental
         resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/compare/valuation"; params))
         _check(resp)
         StructTypes.construct(ValuationComparisonResponse, resp.data)
+    end
+
+    # ── 30. etf_asset_allocation ──────────────────────────────────────
+
+    """
+        etf_asset_allocation(ctx, symbol) -> AssetAllocationResponse
+
+    ETF 资产配置，按 holdings / regional / asset class / industry 分组。
+
+    端点：`GET /v1/quote/etf-asset-allocation`
+    """
+    function etf_asset_allocation(ctx::FundamentalContext, symbol::AbstractString)
+        params = Dict{String,Any}("counter_id" => symbol_to_counter_id(symbol))
+        resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/etf-asset-allocation"; params))
+        _check(resp)
+        StructTypes.construct(AssetAllocationResponse, resp.data)
     end
 
 end # module Fundamental

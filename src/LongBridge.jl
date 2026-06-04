@@ -129,6 +129,7 @@ module LongBridge
     # 市场信息
     export trading_session, trading_days, participants, member_id, quote_level,
            quote_package_details, filings, security_list
+    export symbol_to_counter_ids, resolve_counter_ids
     # 资金流
     export capital_flow, capital_distribution, calc_indexes
     # 市场温度
@@ -211,8 +212,9 @@ module LongBridge
            industry_rank, industry_peers,
            financial_report_snapshot,
            shareholder_top, shareholder_detail,
-           valuation_comparison
-    export FinancialReportKind, FinancialReportPeriod, InstitutionRecommend
+           valuation_comparison,
+           etf_asset_allocation
+    export FinancialReportKind, FinancialReportPeriod, InstitutionRecommend, ElementType
     export FinancialReports,
            RatingEvaluate, RatingTarget, RatingSummaryEvaluate,
            InstitutionRatingLatest, InstitutionRatingSummary, InstitutionRating,
@@ -242,7 +244,8 @@ module LongBridge
            IndustryPeersTop, IndustryPeerNode, IndustryPeersResponse,
            SnapshotForecastMetric, SnapshotReportedMetric, FinancialReportSnapshot,
            ShareholderTopResponse, ShareholderDetailResponse,
-           ValuationHistoryPoint, ValuationComparisonItem, ValuationComparisonResponse
+           ValuationHistoryPoint, ValuationComparisonItem, ValuationComparisonResponse,
+           HoldingDetail, AssetAllocationItem, AssetAllocationGroup, AssetAllocationResponse
 
     # --- Alert (价格提醒) ---
     export AlertContext,
@@ -335,7 +338,7 @@ module LongBridge
             ScreenerContext(cfg)
 
             # Warm small helpers commonly hit on first user call.
-            Utils.symbol_to_counter_id("700.HK")
+            Utils.symbol_to_counter_id("SPY.US")
             Utils.counter_id_to_symbol("ST/HK/700")
         end
     end

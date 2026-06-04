@@ -4,7 +4,7 @@ module FundamentalProtocol
     using ..Utils: Dec64, counter_id_to_symbol, to_china_time
     import ..Utils: _parse_optional_decimal
 
-    export FinancialReportKind, FinancialReportPeriod, InstitutionRecommend,
+    export FinancialReportKind, FinancialReportPeriod, InstitutionRecommend, ElementType,
            FinancialReports,
            RatingEvaluate, RatingTarget, RatingSummaryEvaluate,
            InstitutionRatingLatest, InstitutionRatingSummary, InstitutionRating,
@@ -35,6 +35,7 @@ module FundamentalProtocol
            SnapshotForecastMetric, SnapshotReportedMetric, FinancialReportSnapshot,
            ShareholderTopResponse, ShareholderDetailResponse,
            ValuationHistoryPoint, ValuationComparisonItem, ValuationComparisonResponse,
+           HoldingDetail, AssetAllocationItem, AssetAllocationGroup, AssetAllocationResponse,
            _financial_report_kind_str, _financial_report_period_str, _institution_recommend_from_str
 
     @enumx FinancialReportKind begin
@@ -65,6 +66,14 @@ module FundamentalProtocol
         NoOpinion    = 7
     end
 
+    @enumx ElementType begin
+        Unknown    = 0
+        Holdings   = 1
+        Regional   = 2
+        AssetClass = 3
+        Industry   = 4
+    end
+
     function _financial_report_kind_str(k::FinancialReportKind.T)
         k === FinancialReportKind.IncomeStatement ? "IS"  :
         k === FinancialReportKind.BalanceSheet    ? "BS"  :
@@ -93,6 +102,22 @@ module FundamentalProtocol
         s == "underperform" ? InstitutionRecommend.Underperform :
         s == "no_opinion"   ? InstitutionRecommend.NoOpinion    :
         InstitutionRecommend.Unknown
+    end
+
+    function _element_type_from_int(n::Integer)
+        n == 1 ? ElementType.Holdings   :
+        n == 2 ? ElementType.Regional   :
+        n == 3 ? ElementType.AssetClass :
+        n == 4 ? ElementType.Industry   :
+                 ElementType.Unknown
+    end
+
+    function _element_type_from_value(v)
+        try
+            return _element_type_from_int(v isa AbstractString ? parse(Int, v) : Int(v))
+        catch
+            return ElementType.Unknown
+        end
     end
 
     # ── financial_report ───────────────────────────────────────────────
@@ -1726,6 +1751,105 @@ module FundamentalProtocol
             ValuationComparisonItem[]
         end
         ValuationComparisonResponse(items)
+    end
+
+    # ── etf_asset_allocation ─────────────────────────────────────────
+
+    """
+    ETF 持仓资产配置中的持仓明细，仅 holdings 分组通常有值。
+    """
+    struct HoldingDetail
+        industry_id::String
+        industry_name::String
+        index::String
+        index_name::String
+        holding_type::String
+        holding_type_name::String
+    end
+    StructTypes.StructType(::Type{HoldingDetail}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{HoldingDetail}, obj::JSON3.Object)
+        HoldingDetail(
+            String(get(obj, :industry_id,       "")),
+            String(get(obj, :industry_name,     "")),
+            String(get(obj, :index,             "")),
+            String(get(obj, :index_name,        "")),
+            String(get(obj, :holding_type,      "")),
+            String(get(obj, :holding_type_name, "")),
+        )
+    end
+
+    _opt_holding_detail(::Nothing) = nothing
+    _opt_holding_detail(v) = StructTypes.construct(HoldingDetail, v)
+
+    function _string_map(v)
+        d = Dict{String,String}()
+        if v isa JSON3.Object
+            for (k, val) in pairs(v)
+                d[String(k)] = isnothing(val) ? "" : String(val)
+            end
+        end
+        d
+    end
+
+    """
+    ETF 资产配置分组中的单个元素。holdings 分组会包含 `code`、`symbol` 和 `holding_detail`。
+    """
+    struct AssetAllocationItem
+        name::String
+        code::String
+        position_ratio::String
+        symbol::String
+        name_locales::Dict{String,String}
+        holding_detail::Union{HoldingDetail,Nothing}
+    end
+    StructTypes.StructType(::Type{AssetAllocationItem}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{AssetAllocationItem}, obj::JSON3.Object)
+        AssetAllocationItem(
+            String(get(obj, :name, "")),
+            String(get(obj, :code, "")),
+            String(get(obj, :position_ratio, "")),
+            counter_id_to_symbol(String(get(obj, :counter_id, ""))),
+            _string_map(get(obj, :name_locales_map, nothing)),
+            _opt_holding_detail(get(obj, :holding_detail, nothing)),
+        )
+    end
+
+    """
+    ETF 资产配置分组，`asset_type` 对应 Holdings / Regional / AssetClass / Industry。
+    """
+    struct AssetAllocationGroup
+        report_date::String
+        asset_type::ElementType.T
+        lists::Vector{AssetAllocationItem}
+    end
+    StructTypes.StructType(::Type{AssetAllocationGroup}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{AssetAllocationGroup}, obj::JSON3.Object)
+        items = if haskey(obj, :lists) && !isnothing(obj.lists)
+            [StructTypes.construct(AssetAllocationItem, x) for x in obj.lists]
+        else
+            AssetAllocationItem[]
+        end
+        AssetAllocationGroup(
+            String(get(obj, :report_date, "")),
+            _element_type_from_value(get(obj, :asset_type, 0)),
+            items,
+        )
+    end
+
+    """
+    ETF 资产配置响应。`info` 按元素类型分组。
+    """
+    struct AssetAllocationResponse
+        info::Vector{AssetAllocationGroup}
+    end
+    StructTypes.StructType(::Type{AssetAllocationResponse}) = StructTypes.CustomStruct()
+    function StructTypes.construct(::Type{AssetAllocationResponse}, obj::JSON3.Object)
+        groups = if haskey(obj, :info) && !isnothing(obj.info)
+            [StructTypes.construct(AssetAllocationGroup, x) for x in obj.info]
+        else
+            AssetAllocationGroup[]
+        end
+        AssetAllocationResponse(groups)
     end
 
 end # module FundamentalProtocol

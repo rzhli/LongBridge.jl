@@ -5,6 +5,7 @@ module Utils
 
     export to_namedtuple, to_china_time, to_dataframe, safeparse, Arc,
            symbol_to_counter_id, index_symbol_to_counter_id, counter_id_to_symbol,
+           lookup_counter_id, cache_counter_ids, is_etf,
            json3_to_mutable,
            Dec64
 
@@ -146,40 +147,147 @@ module Utils
 
     # ── Symbol ↔ counter_id 转换 ────────────────────────────────────────
 
-    const _US_ETF_SET = Ref{Union{Nothing, Set{String}}}(nothing)
-    const _US_ETF_LOCK = ReentrantLock()
+    const _SPECIAL_COUNTER_IDS = Ref{Union{Nothing, Set{String}}}(nothing)
+    const _SPECIAL_COUNTER_IDS_LOCK = ReentrantLock()
+    const _CACHED_COUNTER_IDS = Ref{Union{Nothing, Set{String}}}(nothing)
+    const _CACHED_COUNTER_IDS_LOCK = ReentrantLock()
 
-    function _us_etf_set()
-        s = _US_ETF_SET[]
-        isnothing(s) || return s
-        lock(_US_ETF_LOCK) do
-            s2 = _US_ETF_SET[]
-            isnothing(s2) || return s2
-            path = joinpath(@__DIR__, "us_etf_counter.csv")
-            new_set = Set{String}()
+    function _load_counter_ids(files::Tuple{Vararg{String}})
+        ids = Set{String}()
+        for file in files
+            path = isabspath(file) ? file : joinpath(@__DIR__, file)
+            isfile(path) || continue
             for line in eachline(path)
                 t = strip(line)
-                isempty(t) || push!(new_set, String(t))
+                isempty(t) || push!(ids, String(t))
             end
-            _US_ETF_SET[] = new_set
+        end
+        ids
+    end
+
+    function _special_counter_ids()
+        s = _SPECIAL_COUNTER_IDS[]
+        isnothing(s) || return s
+        lock(_SPECIAL_COUNTER_IDS_LOCK) do
+            s2 = _SPECIAL_COUNTER_IDS[]
+            isnothing(s2) || return s2
+            new_set = _load_counter_ids(("us_etf_counter.csv", "index_counter.csv", "warrant_counter.csv"))
+            _SPECIAL_COUNTER_IDS[] = new_set
             return new_set
         end
+    end
+
+    function _counter_cache_path()
+        dir = get(ENV, "LONGBRIDGE_CACHE_DIR", "")
+        if isempty(dir)
+            home = get(ENV, Sys.iswindows() ? "USERPROFILE" : "HOME", "")
+            isempty(home) && return nothing
+            dir = joinpath(home, ".longbridge", "cache")
+        end
+        joinpath(dir, "counter-ids.csv")
+    end
+
+    function _cached_counter_ids()
+        s = _CACHED_COUNTER_IDS[]
+        isnothing(s) || return s
+        lock(_CACHED_COUNTER_IDS_LOCK) do
+            s2 = _CACHED_COUNTER_IDS[]
+            isnothing(s2) || return s2
+            path = _counter_cache_path()
+            new_set = isnothing(path) ? Set{String}() :
+                (isfile(path) ? _load_counter_ids((path,)) : Set{String}())
+            _CACHED_COUNTER_IDS[] = new_set
+            return new_set
+        end
+    end
+
+    _is_hk_numeric_code(code::AbstractString, market::AbstractString) =
+        uppercase(String(market)) == "HK" && all(c -> '0' <= c <= '9', code)
+
+    function _normalize_symbol_code(code::AbstractString, market::AbstractString)
+        if _is_hk_numeric_code(code, market)
+            return replace(String(code), r"^0+" => "")
+        end
+        String(code)
+    end
+
+    """
+        cache_counter_ids(counter_ids) -> Nothing
+
+    Merge remotely resolved `counter_id`s into the local counter-id cache.
+    The cache file is `\$LONGBRIDGE_CACHE_DIR/counter-ids.csv`, or
+    `~/.longbridge/cache/counter-ids.csv` by default.
+    """
+    function cache_counter_ids(counter_ids)
+        lock(_CACHED_COUNTER_IDS_LOCK) do
+            set = _cached_counter_ids()
+            before = length(set)
+            for cid in counter_ids
+                s = strip(String(cid))
+                isempty(s) || push!(set, s)
+            end
+            length(set) == before && return nothing
+
+            path = _counter_cache_path()
+            isnothing(path) && return nothing
+            parent = dirname(path)
+            isdir(parent) || mkpath(parent)
+            lines = sort!(collect(set))
+            open(path, "w") do io
+                for line in lines
+                    println(io, line)
+                end
+            end
+        end
+        return nothing
+    end
+
+    """
+        lookup_counter_id(symbol) -> Union{String,Nothing}
+
+    Resolve `symbol` from local counter directories only: embedded ETF/index/
+    warrant directories, the remote-resolution cache, and leading-dot US index
+    notation. Returns `nothing` when the symbol is unknown locally.
+    """
+    function lookup_counter_id(symbol::AbstractString)
+        s = String(symbol)
+        idx = findlast('.', s)
+        isnothing(idx) && return nothing
+        code_raw = String(SubString(s, 1, prevind(s, idx)))
+        market = uppercase(String(SubString(s, nextind(s, idx))))
+
+        startswith(code_raw, ".") && return string("IX/", market, "/", code_raw)
+
+        code = _normalize_symbol_code(code_raw, market)
+        for prefix in ("ETF", "IX", "WT")
+            candidate = string(prefix, "/", market, "/", code)
+            candidate ∈ _special_counter_ids() && return candidate
+        end
+
+        cached = _cached_counter_ids()
+        for prefix in ("ETF", "IX", "WT", "ST")
+            candidate = string(prefix, "/", market, "/", code)
+            candidate ∈ cached && return candidate
+        end
+        return nothing
     end
 
     """
         symbol_to_counter_id(symbol) -> String
 
     把 LongBridge symbol（如 `"TSLA.US"`）转成内部 counter_id（如 `"ST/US/TSLA"`）。
-    美股 ETF 通过内置 ETF 列表识别，输出 `"ETF/US/..."`。
+    ETF、指数和窝轮通过内置目录识别；未知品种回退到 `"ST/..."`。
     """
     function symbol_to_counter_id(symbol::AbstractString)
         s = String(symbol)
         idx = findlast('.', s)
         isnothing(idx) && return s
-        code   = SubString(s, 1, prevind(s, idx))
-        market = uppercase(SubString(s, nextind(s, idx)))
-        etf_candidate = string("ETF/", market, "/", code)
-        return etf_candidate ∈ _us_etf_set() ? etf_candidate : string("ST/", market, "/", code)
+        cid = lookup_counter_id(s)
+        isnothing(cid) || return cid
+        code_raw = String(SubString(s, 1, prevind(s, idx)))
+        market = uppercase(String(SubString(s, nextind(s, idx))))
+        code = _normalize_symbol_code(code_raw, market)
+        return string("ST/", market, "/", code)
     end
 
     """
@@ -206,6 +314,13 @@ module Utils
         parts = split(s, '/'; limit=3)
         length(parts) == 3 ? string(parts[3], '.', parts[2]) : s
     end
+
+    """
+        is_etf(symbol) -> Bool
+
+    Return whether `symbol` resolves to an ETF counter ID.
+    """
+    is_etf(symbol::AbstractString) = startswith(symbol_to_counter_id(symbol), "ETF/")
 
     """
         json3_to_mutable(x) -> Any
