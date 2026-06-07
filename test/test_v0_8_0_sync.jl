@@ -211,6 +211,27 @@ end
     @test it.history[1].date == unix2datetime(1747257600)
 end
 
+@testset "StockRatings numeric scores" begin
+    raw = """
+    {"style_txt_name":"Growth","scale_txt_name":"Large","report_period_txt":"Q1",
+     "multi_score":88.5,"multi_letter":"A","multi_score_change":2,
+     "industry_name":"semi","industry_rank":"3","industry_total":120,
+     "industry_mean_score":"66.2","industry_median_score":null,
+     "ratings":[
+       {"type":1,"sub_indicators":[
+         {"indicator":{"name":"Quality","score":"90","letter":"A"},
+          "sub_indicators":[{"name":"ROE","value":"20","value_type":"pct","score":1.5,"letter":"A"}]}]}]}
+    """
+    r = StructTypes.construct(StockRatings, JSON3.read(raw))
+    @test r.multi_score == 88.5
+    @test r.industry_rank == 3
+    @test r.industry_total == 120
+    @test r.industry_mean_score == 66.2
+    @test r.industry_median_score === nothing
+    @test r.ratings[1].sub_indicators[1].indicator.score == 90
+    @test r.ratings[1].sub_indicators[1].sub_indicators[1].score == 1.5
+end
+
 @testset "ETF AssetAllocationResponse" begin
     raw = """
     {"info":[

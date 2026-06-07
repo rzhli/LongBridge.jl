@@ -35,6 +35,8 @@ end
          "text":"涨到 600","state":[1],"value_map":{"price":"600"}}"""))
     @test ai.id == "100"
     @test ai.enabled
+    @test ai.value_map isa Dict{String,String}
+    @test ai.value_map["price"] == "600"
 
     al = StructTypes.construct(AlertList, JSON3.read("""
         {"lists":[{"counter_id":"ST/HK/700","code":"700","market":"HK","name":"腾讯",
@@ -67,6 +69,7 @@ end
          "sharelist_type":0,"industry_code":""}"""))
     @test si.id === Int64(42)
     @test si.this_year_chg == Dec64("12.5")
+    @test si.creator.name == "alice"
 
     sc = StructTypes.construct(SharelistScopes, JSON3.read("""{"subscription":true,"self":false}"""))
     @test sc.subscription

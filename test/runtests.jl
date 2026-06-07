@@ -2,7 +2,13 @@ using Test
 using LongBridge
 using LongBridge.Config
 using LongBridge.OAuth
+using LongBridge.Utils: to_dataframe
 using Dates
+
+struct _ToDataFrameItem
+    name::String
+    count::Union{Nothing,Int}
+end
 
 # P0 新增 Context 烟测
 include("test_p0_smoke.jl")
@@ -20,18 +26,40 @@ include("test_v0_8_0_sync.jl")
 include("test_v0_8_1_sync.jl")
 
 @testset "Config defaults" begin
+    direct_cfg = Settings("k", "s", "t", DateTime(2099, 1, 1))
+    @test direct_cfg.http_url == LongBridge.Constant.DEFAULT_HTTP_URL_CN
+    @test direct_cfg.quote_ws_url == LongBridge.Constant.DEFAULT_QUOTE_WS_CN
+    @test direct_cfg.trade_ws_url == LongBridge.Constant.DEFAULT_TRADE_WS_CN
+
     mktemp() do f, io
         write(io, """
         app_key = "k"
         app_secret = "s"
         access_token = "t"
         token_expire_time = "2099-01-01T00:00:00"
+        http_url = "https://example-http.test"
+        quote_ws_url = "wss://example-quote.test"
+        trade_ws_url = "wss://example-trade.test"
         """)
         close(io)
         cfg = from_toml(f)
         @test cfg.language == LongBridge.Constant.Language.ZH_CN
         @test cfg.enable_overnight == true
+        @test cfg.http_url == "https://example-http.test"
+        @test cfg.quote_ws_url == "wss://example-quote.test"
+        @test cfg.trade_ws_url == "wss://example-trade.test"
     end
+end
+
+@testset "to_dataframe typed columns" begin
+    df = to_dataframe([_ToDataFrameItem("a", 1), _ToDataFrameItem("b", nothing)])
+    @test eltype(df.name) != Any
+    @test eltype(df.count) != Any
+    @test df.count[2] === missing
+
+    empty_df = to_dataframe(_ToDataFrameItem[])
+    @test eltype(empty_df.name) != Any
+    @test eltype(empty_df.count) != Any
 end
 
 @testset "Disconnect" begin
@@ -69,22 +97,30 @@ end
 
 @testset "OAuthToken save/load round-trip" begin
     mktempdir() do tmpdir
-        # Temporarily override TOKEN_DIR via save/load with custom path
-        client_id = "test-roundtrip-$(rand(UInt32))"
-        token = OAuthToken(client_id, "access_abc", "refresh_xyz", UInt64(floor(time())) + 3600)
+        old_token_dir = get(ENV, "LONGBRIDGE_TOKEN_DIR", nothing)
+        ENV["LONGBRIDGE_TOKEN_DIR"] = tmpdir
 
-        path = OAuth.save_to_path(token)
-        @test isfile(path)
+        try
+            client_id = "test-roundtrip-$(rand(UInt32))"
+            token = OAuthToken(client_id, "access_abc", "refresh_xyz", UInt64(floor(time())) + 3600)
 
-        loaded = OAuth.load_from_path(client_id)
-        @test !isnothing(loaded)
-        @test loaded.client_id == client_id
-        @test loaded.access_token == "access_abc"
-        @test loaded.refresh_token == "refresh_xyz"
-        @test loaded.expires_at == token.expires_at
+            path = OAuth.save_to_path(token)
+            @test isfile(path)
+            @test dirname(path) == tmpdir
 
-        # Cleanup
-        rm(path; force=true)
+            loaded = OAuth.load_from_path(client_id)
+            @test !isnothing(loaded)
+            @test loaded.client_id == client_id
+            @test loaded.access_token == "access_abc"
+            @test loaded.refresh_token == "refresh_xyz"
+            @test loaded.expires_at == token.expires_at
+        finally
+            if isnothing(old_token_dir)
+                delete!(ENV, "LONGBRIDGE_TOKEN_DIR")
+            else
+                ENV["LONGBRIDGE_TOKEN_DIR"] = old_token_dir
+            end
+        end
     end
 end
 

@@ -27,7 +27,7 @@ using ..Cache: SimpleCache, CacheWithKey, get_or_update, RealtimeStore,
                update_quote!, update_depth!, update_brokers!, update_trades!,
                get_quote, get_depth, get_brokers, get_trades, get_candlesticks,
                update_candlesticks!, clear_candlesticks!
-using ..Utils: to_namedtuple, to_china_time, Arc,
+using ..Utils: to_namedtuple, to_china_time,
                symbol_to_counter_id, counter_id_to_symbol,
                lookup_counter_id, cache_counter_ids
 using ..QuoteProtocol: PushQuote, PushDepth, PushBrokers, Trade, Candlestick
@@ -64,14 +64,14 @@ struct GenericRequestCmd{R,T} <: AbstractCommand
     resp_ch::Channel{Any}
 end
 
-# --- Core Actor and Context Structs ---
+# --- Background Task and Context Structs ---
 
 mutable struct InnerQuoteContext
     config::Config.Settings
     ws_client::Union{WSClient, Nothing}
     session_id::Union{String, Nothing}
     command_ch::Channel{AbstractCommand}
-    core_task::Union{Task, Nothing}
+    background_task::Union{Task, Nothing}
     push_dispatcher_task::Union{Task, Nothing}
     callbacks::QuotePush.Callbacks
     subscriptions::Set{Tuple{Vector{String}, Vector{SubType.T}}}
@@ -89,16 +89,74 @@ mutable struct InnerQuoteContext
 end
 
 @doc """
-Quote context handle. It is a lightweight wrapper around the core actor.
+Quote context handle. It owns shared mutable state used by the background tasks.
 """
 struct QuoteContext
-    inner::Arc{InnerQuoteContext}
+    inner::InnerQuoteContext
 end
 
-# --- Core Actor Logic ---
+const REQUEST_WAIT_TIMEOUT = Client.REQUEST_TIMEOUT + 5.0
 
-function core_run(inner::InnerQuoteContext, push_tx::Channel{Tuple{UInt8, Vector{UInt8}}})
-    # @info "Quote core actor started."
+function _is_reconnectable_ws_error(e)
+    msg = sprint(showerror, e)
+    return (e isa LongBridgeError && (occursin("WebSocket", e.message) || e.code == 408)) ||
+           (e isa ArgumentError && occursin("WebSocket", msg)) ||
+           e isa EOFError
+end
+
+function _submit_command!(ctx::QuoteContext, cmd::AbstractCommand)
+    inner = ctx.inner
+    task = inner.background_task
+    if isnothing(task) || istaskdone(task) || !isopen(inner.command_ch)
+        throw(LongBridgeError(500, "Quote background task is not running"))
+    end
+
+    try
+        put!(inner.command_ch, cmd)
+    catch e
+        if e isa InvalidStateException
+            throw(LongBridgeError(500, "Quote command channel is closed"))
+        end
+        rethrow(e)
+    end
+end
+
+function _take_task_response!(ch::Channel, context_name::AbstractString)
+    timer = Timer(REQUEST_WAIT_TIMEOUT) do _
+        isopen(ch) && close(ch)
+    end
+
+    try
+        return take!(ch)
+    catch e
+        if e isa InvalidStateException
+            throw(LongBridgeError(408, "$context_name request timed out waiting for background task"))
+        end
+        rethrow(e)
+    finally
+        close(timer)
+    end
+end
+
+function _resubscribe_quote!(inner::InnerQuoteContext)
+    isempty(inner.subscriptions) && return
+
+    @info "Resubscribing to topics..."
+    for (symbols, sub_types) in inner.subscriptions
+        try
+            req = QuoteSubscribeRequest(symbols, sub_types, true)
+            cmd = GenericRequestCmd(QuoteCommand.Subscribe, req, QuoteSubscribeResponse, Channel(1))
+            handle_command(inner, cmd)
+        catch e
+            @error "Failed to resubscribe" symbols=symbols sub_types=sub_types exception=(e, catch_backtrace())
+        end
+    end
+end
+
+# --- Background Task Logic ---
+
+function run_quote_loop(inner::InnerQuoteContext, push_tx::Channel{Tuple{UInt8, Vector{UInt8}}})
+    # @info "Quote background task started."
     should_run = true
     reconnect_attempts = 0
 
@@ -110,6 +168,7 @@ function core_run(inner::InnerQuoteContext, push_tx::Channel{Tuple{UInt8, Vector
                 ws = WSClient(inner.config.quote_ws_url, inner.config)
                 inner.ws_client = ws
                 ws.on_push = (cmd, body) -> put!(push_tx, (cmd, body))
+                ws.on_reconnect = () -> _resubscribe_quote!(inner)
                 ws.auth_data = Client.create_auth_request(inner.config)
                 Client.connect!(ws)
                 inner.session_id = ws.session_id # Save session_id
@@ -117,18 +176,7 @@ function core_run(inner::InnerQuoteContext, push_tx::Channel{Tuple{UInt8, Vector
                 reconnect_attempts = 0 # Reset on successful connection
 
                 # Resubscribe to all topics after successful reconnection
-                if !isempty(inner.subscriptions)
-                    @info "Resubscribing to topics..."
-                    for (symbols, sub_types) in inner.subscriptions
-                        try
-                            req = QuoteSubscribeRequest(symbols, sub_types, true)
-                            cmd = GenericRequestCmd(QuoteCommand.Subscribe, req, QuoteSubscribeResponse, Channel(1))
-                            handle_command(inner, cmd) # Directly handle, don't wait on channel
-                        catch e
-                            @error "Failed to resubscribe" symbols=symbols sub_types=sub_types exception=(e, catch_backtrace())
-                        end
-                    end
-                end
+                _resubscribe_quote!(inner)
             end
 
             # Fetch user profile (member_id / quote_level / quote_package_details)
@@ -155,15 +203,22 @@ function core_run(inner::InnerQuoteContext, push_tx::Channel{Tuple{UInt8, Vector
 
             # 2. Main Command Processing Loop
             for cmd in inner.command_ch
-                handle_command(inner, cmd)
+                reconnect_needed = handle_command(inner, cmd)
                 if cmd isa DisconnectCmd
                     should_run = false
+                    break
+                elseif reconnect_needed
+                    @warn "Quote WebSocket command failed; reconnecting before processing more commands"
+                    if !isnothing(inner.ws_client)
+                        Client.disconnect!(inner.ws_client)
+                        inner.ws_client = nothing
+                    end
                     break
                 end
             end
         catch e
-            if e isa InvalidStateException && e.state == :closed
-                # @warn "Command channel closed, shutting down core actor."
+                if e isa InvalidStateException && e.state == :closed
+                # @warn "Command channel closed, shutting down quote task."
                 should_run = false
             elseif e isa LongBridgeError && occursin("WebSocket", e.message)
                 @warn "Connection lost, attempting to reconnect..." exception=(e, catch_backtrace())
@@ -172,7 +227,7 @@ function core_run(inner::InnerQuoteContext, push_tx::Channel{Tuple{UInt8, Vector
                 Client.full_reconnect!(inner.ws_client)
 
             else
-                @error "Quote core actor failed with an unhandled exception" exception=(e, catch_backtrace())
+                @error "Quote background task failed with an unhandled exception" exception=(e, catch_backtrace())
                 should_run = false # Exit on unhandled errors
             end
         finally
@@ -185,10 +240,12 @@ function core_run(inner::InnerQuoteContext, push_tx::Channel{Tuple{UInt8, Vector
     end
 
     close(push_tx)
-    # @info "Quote core actor stopped."
+    isopen(inner.command_ch) && close(inner.command_ch)
+    # @info "Quote background task stopped."
 end
 
 function handle_command(inner::InnerQuoteContext, cmd::AbstractCommand)
+    reconnect_needed = false
     resp = try
         if cmd isa DisconnectCmd
             # No response needed, just break the loop
@@ -237,6 +294,7 @@ function handle_command(inner::InnerQuoteContext, cmd::AbstractCommand)
             Client.http_delete(inner.config, cmd.path; params=cmd.params)
         end
     catch e
+        reconnect_needed = cmd isa GenericRequestCmd && _is_reconnectable_ws_error(e)
         @error "Failed to handle command" command=typeof(cmd) exception=(e, catch_backtrace())
         e # Propagate exception as the response
     end
@@ -245,6 +303,7 @@ function handle_command(inner::InnerQuoteContext, cmd::AbstractCommand)
     if !(cmd isa DisconnectCmd) && isopen(cmd.resp_ch)
         put!(cmd.resp_ch, resp)
     end
+    return reconnect_needed
 end
 
 # --- Push Dispatcher ---
@@ -290,8 +349,8 @@ end
 @doc """
 Creates and initializes a `QuoteContext`.
 
-This is the main entry point for using the quote API. It sets up the WebSocket connection
-and the background processing task (Actor).
+This is the main entry point for using the quote API. It sets up the WebSocket
+connection and the background tasks.
 
 # Arguments
 - `config::Config.Settings`: The configuration object.
@@ -305,7 +364,7 @@ function QuoteContext(config::Config.Settings)
         nothing, # ws_client
         nothing, # session_id
         command_ch,
-        nothing, # core_task
+        nothing, # background_task
         nothing, # push_dispatcher_task
         QuotePush.Callbacks(),
         Set{Tuple{Vector{String}, Vector{SubType.T}}}(),
@@ -317,17 +376,17 @@ function QuoteContext(config::Config.Settings)
         0, "", QuotePackageDetail[],
     )
     
-    ctx = QuoteContext(Arc(inner))
+    ctx = QuoteContext(inner)
 
     # Start background tasks
-    inner.core_task = @async core_run(inner, push_ch)
+    inner.background_task = @async run_quote_loop(inner, push_ch)
     inner.push_dispatcher_task = @async dispatch_push_events(ctx, push_ch)
 
     return ctx
 end
 
 @doc """
-Disconnects the WebSocket and shuts down the background actor.
+Disconnects the WebSocket and shuts down the background tasks.
 """
 
 # Internal helper to send a command and wait for response
@@ -337,16 +396,16 @@ Disconnects the WebSocket and shuts down the background actor.
 # propagate concrete type info to every downstream `.field` access at
 # the call site (eliminates the previous Any → field-access widening).
 function request(ctx::QuoteContext, cmd::GenericRequestCmd{R,T}) where {R,T}
-    put!(ctx.inner.command_ch, cmd)
-    resp = take!(cmd.resp_ch)
+    _submit_command!(ctx, cmd)
+    resp = _take_task_response!(cmd.resp_ch, "Quote")
     resp isa Exception && throw(resp)
     return resp::T
 end
 
 # Generic fallback for HTTP* commands (no compile-time response type).
 function request(ctx::QuoteContext, cmd::AbstractCommand)
-    put!(ctx.inner.command_ch, cmd)
-    resp = take!(cmd.resp_ch)
+    _submit_command!(ctx, cmd)
+    resp = _take_task_response!(cmd.resp_ch, "Quote")
 
     if resp isa Exception
         throw(resp)
@@ -997,11 +1056,11 @@ end
 
 function disconnect!(ctx::QuoteContext)
     inner = ctx.inner
-    if !isnothing(inner.core_task) && !istaskdone(inner.core_task)
+    if !isnothing(inner.background_task) && !istaskdone(inner.background_task)
         put!(inner.command_ch, DisconnectCmd())
         close(inner.command_ch)
 
-        wait(inner.core_task)
+        wait(inner.background_task)
 
         if !isnothing(inner.push_dispatcher_task) && !istaskdone(inner.push_dispatcher_task)
             wait(inner.push_dispatcher_task)
@@ -1010,7 +1069,7 @@ function disconnect!(ctx::QuoteContext)
 end
 
 # ════════════════════════════════════════════════════════════════════════
-# v4.1.0 新增 HTTP-only 方法（直接走 Client.http_get/post，不经 actor）
+# v4.1.0 新增 HTTP-only 方法（直接走 Client.http_get/post，不经后台任务）
 # ════════════════════════════════════════════════════════════════════════
 
 using StructTypes

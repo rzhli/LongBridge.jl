@@ -37,6 +37,15 @@ const COMMAND_CODE_HEARTBEAT = UInt8(ControlCommand.CMD_HEARTBEAT)
 const COMMAND_CODE_RECONNECT = UInt8(ControlCommand.CMD_RECONNECT)
 const COMMAND_CODE_CLOSE = UInt8(ControlCommand.CMD_CLOSE)
 
+function _websocket_url(url::String)
+    query_params = [
+        "version=$(Constant.PROTOCOL_VERSION)",
+        "codec=$(Constant.CODEC_TYPE)",
+        "platform=$(Constant.PLATFORM_TYPE)"
+    ]
+    return url * "?" * join(query_params, "&")
+end
+
 # ==================== Signature Authentication ====================
 
 """
@@ -254,6 +263,7 @@ mutable struct WSClient
     auth_event::Threads.Event
     auth_data::Union{Nothing,Vector{UInt8}}
     on_push::Union{Function, Nothing}
+    on_reconnect::Union{Function, Nothing}
     heartbeat_task::Union{Nothing, Task}
     reconnect_attempts::Int
     reconnect_task::Union{Nothing, Task}
@@ -270,6 +280,7 @@ mutable struct WSClient
             ReentrantLock(),        # send_lock
             Threads.Event(),        # auth_event (set after successful auth)
             nothing,                # auth_data
+            nothing,
             nothing,
             nothing,                # heartbeat_task
             0,                      # reconnect_attempts
@@ -290,15 +301,7 @@ function connect!(client::WSClient)
     end
 
     @info "正在连接到 WS 服务器: $(client.url)"
-    base_url = client.url
-
-    query_params = [
-        "version=$(Constant.PROTOCOL_VERSION)",
-        "codec=$(Constant.CODEC_TYPE)",
-        "platform=$(Constant.PLATFORM_TYPE)"
-    ]
-
-    full_url = base_url * "?" * join(query_params, "&")
+    full_url = _websocket_url(client.url)
 
     # Reset auth signal in case this is a reconnect
     client.auth_event = Threads.Event()
@@ -322,7 +325,7 @@ function connect!(client::WSClient)
                 start_message_loop(client)
 
                 # 保持连接开放，直到被外部关闭
-                while _ws_is_open(client.ws)
+                while client.ws === ws && _ws_is_open(ws)
                     sleep(0.1)
                 end
             end
@@ -438,18 +441,21 @@ start_message_loop(client::WSClient)
 启动消息处理循环。
 """
 function start_heartbeat_loop(client::WSClient)
+    ws = client.ws
+    isnothing(ws) && return
+
     client.heartbeat_task = @async begin
         try
             @info "启动心跳循环"
-            while client.connected && _ws_is_open(client.ws)
+            while client.connected && client.ws === ws && _ws_is_open(ws)
                 sleep(30) # Send a ping every 30 seconds
                 
                 try
                     # Use WebSocket's built-in ping for network-level keep-alive
-                    WebSockets.ping(client.ws)
+                    WebSockets.ping(ws)
                     @debug "发送 WebSocket Ping 帧"
                 catch e
-                    if client.connected
+                    if client.connected && client.ws === ws
                         @warn "发送 Ping 帧失败，可能连接已断开" exception=(e, catch_backtrace())
                         # Trigger reconnection logic if ping fails
                         full_reconnect!(client)
@@ -474,12 +480,15 @@ start_message_loop(client::WSClient)
 启动消息处理循环。
 """
 function start_message_loop(client::WSClient)
+    ws = client.ws
+    isnothing(ws) && return
+
     @async begin
         try
             @info "启动消息处理循环" 
             # 使用HTTP.jl推荐的WebSocket消息循环模式
             try
-                for msg in client.ws
+                for msg in ws
                     @debug "接收到WebSocket消息" msg=msg typeof=typeof(msg)
                     data = if msg isa String
                         Vector{UInt8}(codeunits(msg))
@@ -589,11 +598,11 @@ function start_message_loop(client::WSClient)
                         if cmd == COMMAND_CODE_CLOSE
                             close_msg = ControlProtocol.decode(body, ControlProtocol.Close)
                             @warn "收到服务器关闭连接指令" code=close_msg.code reason=close_msg.reason
-                            disconnect!(client)
+                            client.ws === ws && disconnect!(client)
                         elseif cmd == COMMAND_CODE_RECONNECT
                             reconnect_msg = ControlProtocol.decode(body, ControlProtocol.ReconnectRequest)
                             @warn "收到服务器重连指令" session_id=reconnect_msg.session_id
-                            reconnect!(client)
+                            client.ws === ws && reconnect!(client)
                         elseif !isnothing(client.on_push)
                             try
                                 client.on_push(cmd, body)
@@ -610,10 +619,10 @@ function start_message_loop(client::WSClient)
                     @info "消息循环被中断"
                 elseif e isa EOFError
                     # 连接已被对方正常关闭，执行清理
-                    disconnect!(client)
+                    client.ws === ws && disconnect!(client)
                 else
                     @error "消息循环异常" exception=(e, catch_backtrace())
-                    disconnect!(client)
+                    client.ws === ws && disconnect!(client)
                 end
             end            
         catch e
@@ -636,45 +645,101 @@ function reconnect!(client::WSClient)
     end
 
     @info "尝试使用 session_id 进行快速重连..."
-    try
-        # 1. 物理连接
-        WebSockets.open(
-            client.url;
-            connect_timeout = DEFAULT_TIMEOUT.connect,
-            read_idle_timeout = DEFAULT_TIMEOUT.read,
-            write_idle_timeout = DEFAULT_TIMEOUT.write,
-        ) do ws
-            client.ws = ws
-            
-            # 2. 发送 ReconnectRequest
-            metadata = Dict("client_version" => Constant.DEFAULT_CLIENT_VERSION)
-            if client.config.enable_overnight
-                metadata["need_over_night_quote"] = "true"
-            end
-            reconnect_req = ControlProtocol.ReconnectRequest(client.session_id, metadata)
-            req_body = ControlProtocol.encode(reconnect_req)
-            
-            # 使用 ws_request 发送并等待响应
-            resp_body = ws_request(client, COMMAND_CODE_RECONNECT, req_body)
-            
-            # 3. 处理响应
-            reconnect_resp = ControlProtocol.decode(resp_body, ControlProtocol.ReconnectResponse)
-            
-            client.connected = true
-            client.session_id = reconnect_resp.session_id # 更新 session_id
-            @info "快速重连成功" new_session_id=client.session_id
-            
-            # 重启心跳和消息循环
-            start_message_loop(client)
-            start_heartbeat_loop(client)
-            return true
-        end
-    catch e
-        @error "快速重连失败" exception = (e, catch_backtrace())
-        client.connected = false
-        return false
+
+    if !isnothing(client.heartbeat_task) && !istaskdone(client.heartbeat_task)
+        schedule(client.heartbeat_task, InterruptException(); error=true)
+        client.heartbeat_task = nothing
     end
-    return false # Should not be reached
+
+    old_ws = client.ws
+    reconnect_event = Threads.Event()
+    reconnect_error = Ref{Any}(nothing)
+    reconnect_ok = Ref(false)
+
+    @async begin
+        try
+            full_url = _websocket_url(client.url)
+
+            # 1. 物理连接
+            WebSockets.open(
+                full_url;
+                connect_timeout = DEFAULT_TIMEOUT.connect,
+                read_idle_timeout = DEFAULT_TIMEOUT.read,
+                write_idle_timeout = DEFAULT_TIMEOUT.write,
+            ) do ws
+                client.ws = ws
+                client.seq_id = UInt32(1)
+                client.connected = true
+
+                # ws_request relies on the message loop to dispatch the
+                # reconnect response into client.pending.
+                start_message_loop(client)
+            
+                # 2. 发送 ReconnectRequest
+                metadata = Dict("client_version" => Constant.DEFAULT_CLIENT_VERSION)
+                if client.config.enable_overnight
+                    metadata["need_over_night_quote"] = "true"
+                end
+                reconnect_req = ControlProtocol.ReconnectRequest(client.session_id, metadata)
+                req_body = ControlProtocol.encode(reconnect_req)
+
+                # 使用 ws_request 发送并等待响应
+                resp_body = ws_request(client, COMMAND_CODE_RECONNECT, req_body)
+
+                # 3. 处理响应
+                reconnect_resp = ControlProtocol.decode(resp_body, ControlProtocol.ReconnectResponse)
+
+                client.connected = true
+                client.session_id = reconnect_resp.session_id # 更新 session_id
+                @info "快速重连成功" new_session_id=client.session_id
+            
+                reconnect_ok[] = true
+                notify(client.auth_event)
+                notify(reconnect_event)
+
+                if !isnothing(old_ws) && old_ws !== ws && _ws_is_open(old_ws)
+                    try
+                        WebSockets.close(old_ws)
+                    catch
+                    end
+                end
+
+                # 重启心跳
+                start_heartbeat_loop(client)
+
+                # Keep HTTP.WebSockets.open's do-block alive for the new socket.
+                while client.ws === ws && _ws_is_open(ws)
+                    sleep(0.1)
+                end
+            end
+        catch e
+            reconnect_error[] = (e, catch_backtrace())
+            client.connected = false
+            notify(reconnect_event)
+        end
+    end
+
+    timer = Timer(REQUEST_TIMEOUT) do _
+        notify(reconnect_event)
+    end
+    try
+        wait(reconnect_event)
+    finally
+        close(timer)
+    end
+
+    if reconnect_ok[]
+        return true
+    end
+
+    if !isnothing(reconnect_error[])
+        err, bt = reconnect_error[]
+        @error "快速重连失败" exception=(err, bt)
+    else
+        @error "快速重连超时"
+    end
+    full_reconnect!(client)
+    return false
 end
 
 function full_reconnect!(client::WSClient)
@@ -695,6 +760,13 @@ function full_reconnect!(client::WSClient)
                 if client.connected
                     @info "完全重连成功"
                     client.reconnect_attempts = 0
+                    if !isnothing(client.on_reconnect)
+                        try
+                            Base.invokelatest(client.on_reconnect)
+                        catch e
+                            @error "重连后恢复订阅失败" exception=(e, catch_backtrace())
+                        end
+                    end
                     return
                 end
             catch e

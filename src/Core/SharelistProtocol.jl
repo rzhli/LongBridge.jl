@@ -7,6 +7,8 @@ module SharelistProtocol
     export SharelistStock, SharelistInfo, SharelistList,
            SharelistScopes, SharelistDetail
 
+    const RawJSON = Union{JSON3.Object,JSON3.Array,Dict{String,Any},Vector{Any},Nothing}
+
     # ── SharelistStock ─────────────────────────────────────────────────
 
     struct SharelistStock
@@ -55,7 +57,7 @@ module SharelistProtocol
         created_at::DateTime
         edited_at::DateTime
         this_year_chg::Union{Dec64,Nothing}
-        creator::Any                       # JSON 原值，结构复杂
+        creator::RawJSON                   # JSON 原值，结构复杂
         stocks::Vector{SharelistStock}
         subscribed::Bool
         chg::Union{Dec64,Nothing}

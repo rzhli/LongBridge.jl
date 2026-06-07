@@ -39,6 +39,13 @@ module PortfolioProtocol
         AssetType.Unknown
     end
 
+    const MaybeTimestamp = Union{Int64,String,Nothing}
+
+    _timestamp_value(::Nothing)::MaybeTimestamp = nothing
+    _timestamp_value(v::Integer)::MaybeTimestamp = Int64(v)
+    _timestamp_value(v::AbstractString)::MaybeTimestamp = String(v)
+    _timestamp_value(v)::MaybeTimestamp = string(v)
+
     # ── ExchangeRate ────────────────────────────────────────────────────
 
     struct ExchangeRate
@@ -350,7 +357,7 @@ module PortfolioProtocol
 
     struct FlowItem
         executed_date::String
-        executed_timestamp::Any              # API 可能返回 int 或 string，保持原值
+        executed_timestamp::MaybeTimestamp   # API 可能返回 int 或 string，保持原值
         code::String
         direction::FlowDirection.T
         executed_quantity::Union{Dec64,Nothing}
@@ -362,7 +369,7 @@ module PortfolioProtocol
     function StructTypes.construct(::Type{FlowItem}, obj::JSON3.Object)
         FlowItem(
             String(get(obj, :executed_date, "")),
-            get(obj, :executed_timestamp, nothing),
+            _timestamp_value(get(obj, :executed_timestamp, nothing)),
             String(get(obj, :code, "")),
             _flow_direction_from_str(String(get(obj, :direction, ""))),
             _parse_optional_decimal(get(obj, :executed_quantity, nothing)),

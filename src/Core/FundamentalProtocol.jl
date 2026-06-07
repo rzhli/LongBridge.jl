@@ -74,6 +74,22 @@ module FundamentalProtocol
         Industry   = 4
     end
 
+    const RawJSON = Union{JSON3.Object,JSON3.Array,Dict{String,Any},Vector{Any},Nothing}
+    const MaybeNumber = Union{Int64,Float64,Nothing}
+
+    _maybe_number(::Nothing)::MaybeNumber = nothing
+    _maybe_number(v::Integer)::MaybeNumber = Int64(v)
+    _maybe_number(v::AbstractFloat)::MaybeNumber = Float64(v)
+    _maybe_number(v::Real)::MaybeNumber = Float64(v)
+    function _maybe_number(v::AbstractString)::MaybeNumber
+        isempty(v) && return nothing
+        i = tryparse(Int64, String(v))
+        isnothing(i) || return i
+        f = tryparse(Float64, String(v))
+        isnothing(f) ? nothing : f
+    end
+    _maybe_number(v)::MaybeNumber = nothing
+
     function _financial_report_kind_str(k::FinancialReportKind.T)
         k === FinancialReportKind.IncomeStatement ? "IS"  :
         k === FinancialReportKind.BalanceSheet    ? "BS"  :
@@ -123,7 +139,7 @@ module FundamentalProtocol
     # ── financial_report ───────────────────────────────────────────────
 
     struct FinancialReports
-        list::Any                            # 嵌套数据结构因 kind 而异，保留原 JSON
+        list::RawJSON                        # 嵌套数据结构因 kind 而异，保留原 JSON
     end
     StructTypes.StructType(::Type{FinancialReports}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{FinancialReports}, obj::JSON3.Object) =
@@ -1129,16 +1145,16 @@ module FundamentalProtocol
         title::String
         txt::String
         latest::Bool
-        keywords::Vector{Any}
+        keywords::Vector{String}
         web_url::String
         financial::OperatingFinancial
     end
     StructTypes.StructType(::Type{OperatingItem}) = StructTypes.CustomStruct()
     function StructTypes.construct(::Type{OperatingItem}, obj::JSON3.Object)
         kws = if haskey(obj, :keywords) && !isnothing(obj.keywords)
-            Any[k for k in obj.keywords]
+            String[String(k) for k in obj.keywords if !isnothing(k)]
         else
-            Any[]
+            String[]
         end
         OperatingItem(
             String(get(obj, :id, "")),
@@ -1242,7 +1258,7 @@ module FundamentalProtocol
         name::String
         value::String
         value_type::String
-        score::Any                 # API 可能返回 int / float / null
+        score::MaybeNumber         # API 可能返回 int / float / null
         letter::String
     end
     StructTypes.StructType(::Type{RatingLeafIndicator}) = StructTypes.CustomStruct()
@@ -1251,21 +1267,21 @@ module FundamentalProtocol
             String(get(obj, :name, "")),
             String(get(obj, :value, "")),
             String(get(obj, :value_type, "")),
-            get(obj, :score, nothing),
+            _maybe_number(get(obj, :score, nothing)),
             String(get(obj, :letter, "")),
         )
     end
 
     struct RatingIndicator
         name::String
-        score::Any
+        score::MaybeNumber
         letter::String
     end
     StructTypes.StructType(::Type{RatingIndicator}) = StructTypes.CustomStruct()
     function StructTypes.construct(::Type{RatingIndicator}, obj::JSON3.Object)
         RatingIndicator(
             String(get(obj, :name, "")),
-            get(obj, :score, nothing),
+            _maybe_number(get(obj, :score, nothing)),
             String(get(obj, :letter, "")),
         )
     end
@@ -1302,14 +1318,14 @@ module FundamentalProtocol
         style_txt_name::String
         scale_txt_name::String
         report_period_txt::String
-        multi_score::Any
+        multi_score::MaybeNumber
         multi_letter::String
         multi_score_change::Int
         industry_name::String
-        industry_rank::Any
-        industry_total::Any
-        industry_mean_score::Any
-        industry_median_score::Any
+        industry_rank::MaybeNumber
+        industry_total::MaybeNumber
+        industry_mean_score::MaybeNumber
+        industry_median_score::MaybeNumber
         ratings::Vector{RatingCategory}
     end
     StructTypes.StructType(::Type{StockRatings}) = StructTypes.CustomStruct()
@@ -1323,14 +1339,14 @@ module FundamentalProtocol
             String(get(obj, :style_txt_name, "")),
             String(get(obj, :scale_txt_name, "")),
             String(get(obj, :report_period_txt, "")),
-            get(obj, :multi_score, nothing),
+            _maybe_number(get(obj, :multi_score, nothing)),
             String(get(obj, :multi_letter, "")),
             Int(get(obj, :multi_score_change, 0)),
             String(get(obj, :industry_name, "")),
-            get(obj, :industry_rank, nothing),
-            get(obj, :industry_total, nothing),
-            get(obj, :industry_mean_score, nothing),
-            get(obj, :industry_median_score, nothing),
+            _maybe_number(get(obj, :industry_rank, nothing)),
+            _maybe_number(get(obj, :industry_total, nothing)),
+            _maybe_number(get(obj, :industry_mean_score, nothing)),
+            _maybe_number(get(obj, :industry_median_score, nothing)),
             cats,
         )
     end
@@ -1657,7 +1673,7 @@ module FundamentalProtocol
     `shareholder_top` 的原始 JSON 响应包装。结构因品种而变，保留原 `JSON3.Object`。
     """
     struct ShareholderTopResponse
-        data::Any
+        data::RawJSON
     end
     StructTypes.StructType(::Type{ShareholderTopResponse}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{ShareholderTopResponse}, obj) = ShareholderTopResponse(obj)
@@ -1666,7 +1682,7 @@ module FundamentalProtocol
     `shareholder_detail` 的原始 JSON 响应包装。
     """
     struct ShareholderDetailResponse
-        data::Any
+        data::RawJSON
     end
     StructTypes.StructType(::Type{ShareholderDetailResponse}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{ShareholderDetailResponse}, obj) = ShareholderDetailResponse(obj)

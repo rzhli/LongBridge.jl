@@ -68,6 +68,8 @@ module MarketProtocol
         Market.Unknown
     end
 
+    const RawJSON = Union{JSON3.Object,JSON3.Array,Dict{String,Any},Vector{Any},Nothing}
+
     # ── market_status ──────────────────────────────────────────────────
 
     struct MarketTimeItem
@@ -505,7 +507,7 @@ module MarketProtocol
         alert_reason::String
         alert_type::Int64
         stock::TopMoversStock
-        post::Any
+        post::RawJSON
     end
     StructTypes.StructType(::Type{TopMoversEvent}) = StructTypes.CustomStruct()
     function StructTypes.construct(::Type{TopMoversEvent}, obj::JSON3.Object)
@@ -525,7 +527,7 @@ module MarketProtocol
 
     struct TopMoversResponse
         events::Vector{TopMoversEvent}
-        next_params::Any
+        next_params::RawJSON
     end
     StructTypes.StructType(::Type{TopMoversResponse}) = StructTypes.CustomStruct()
     function StructTypes.construct(::Type{TopMoversResponse}, obj::JSON3.Object)
@@ -543,7 +545,7 @@ module MarketProtocol
     排行榜分类元数据。结构因 API 演进而变，原样保留 JSON。
     """
     struct RankCategoriesResponse
-        data::Any
+        data::RawJSON
     end
     StructTypes.StructType(::Type{RankCategoriesResponse}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{RankCategoriesResponse}, obj) = RankCategoriesResponse(obj)

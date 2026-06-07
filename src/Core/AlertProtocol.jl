@@ -20,6 +20,13 @@ module AlertProtocol
         Once      = 3   # 仅一次
     end
 
+    function _string_map(obj)
+        if obj isa JSON3.Object || obj isa AbstractDict
+            return Dict{String,String}(String(k) => String(v) for (k, v) in pairs(obj) if !isnothing(v))
+        end
+        return Dict{String,String}()
+    end
+
     # ── AlertItem ──────────────────────────────────────────────────────
 
     struct AlertItem
@@ -30,7 +37,7 @@ module AlertProtocol
         scope::Int
         text::String              # 显示文本（如 "价格涨到 600"）
         state::Vector{Int}
-        value_map::Any            # JSON 原值：{"price":"500"} 或 {"chg":"5"}
+        value_map::Dict{String,String}
     end
     StructTypes.StructType(::Type{AlertItem}) = StructTypes.CustomStruct()
     function StructTypes.construct(::Type{AlertItem}, obj::JSON3.Object)
@@ -47,7 +54,7 @@ module AlertProtocol
             Int(get(obj, :scope, 0)),
             String(get(obj, :text, "")),
             state,
-            get(obj, :value_map, nothing),
+            _string_map(get(obj, :value_map, nothing)),
         )
     end
 

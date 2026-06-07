@@ -11,6 +11,14 @@ module ScreenerProtocol
 
     # 上游 5 个端点均返回结构多变的 JSON——这里统一保留原始 JSON 对象，
     # 由调用方按需取字段。后续若 API 稳定可再细化类型。
+    const RawJSON = Union{JSON3.Object,JSON3.Array,Dict{String,Any},Vector{Any},Nothing}
+
+    function _string_any_dict(x)
+        if x isa AbstractDict || x isa JSON3.Object
+            return Dict{String,Any}(String(k) => v for (k, v) in pairs(x))
+        end
+        return Dict{String,Any}()
+    end
 
     # ── screener_condition (v4.2.1 新增) ───────────────────────────
 
@@ -23,21 +31,25 @@ module ScreenerProtocol
     - `min` / `max`：区间边界，空字符串表示该边无限制。
     - `tech_values`：技术指标参数（基本面指标传空 Dict 即可），如 `Dict("category"=>"goldenfork","period"=>"day")`。
     """
-    Base.@kwdef struct ScreenerCondition
+    struct ScreenerCondition
         key::String
-        min::String = ""
-        max::String = ""
-        tech_values::Any = Dict{String,Any}()
+        min::String
+        max::String
+        tech_values::Dict{String,Any}
     end
+
     ScreenerCondition(key::AbstractString; min::AbstractString="", max::AbstractString="",
                       tech_values=Dict{String,Any}()) =
-        ScreenerCondition(String(key), String(min), String(max), tech_values)
+        ScreenerCondition(String(key), String(min), String(max), _string_any_dict(tech_values))
+    ScreenerCondition(; key::AbstractString, min::AbstractString="", max::AbstractString="",
+                      tech_values=Dict{String,Any}()) =
+        ScreenerCondition(key; min, max, tech_values)
 
     """
     `screener_recommend_strategies` 的原始 JSON 响应包装。
     """
     struct ScreenerRecommendStrategiesResponse
-        data::Any
+        data::RawJSON
     end
     StructTypes.StructType(::Type{ScreenerRecommendStrategiesResponse}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{ScreenerRecommendStrategiesResponse}, obj) =
@@ -47,7 +59,7 @@ module ScreenerProtocol
     `screener_user_strategies` 的原始 JSON 响应包装。
     """
     struct ScreenerUserStrategiesResponse
-        data::Any
+        data::RawJSON
     end
     StructTypes.StructType(::Type{ScreenerUserStrategiesResponse}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{ScreenerUserStrategiesResponse}, obj) =
@@ -57,7 +69,7 @@ module ScreenerProtocol
     `screener_strategy` 的原始 JSON 响应包装。
     """
     struct ScreenerStrategyResponse
-        data::Any
+        data::RawJSON
     end
     StructTypes.StructType(::Type{ScreenerStrategyResponse}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{ScreenerStrategyResponse}, obj) =
@@ -67,7 +79,7 @@ module ScreenerProtocol
     `screener_search` 的原始 JSON 响应包装（含分页结果）。
     """
     struct ScreenerSearchResponse
-        data::Any
+        data::RawJSON
     end
     StructTypes.StructType(::Type{ScreenerSearchResponse}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{ScreenerSearchResponse}, obj) =
@@ -77,7 +89,7 @@ module ScreenerProtocol
     `screener_indicators` 的原始 JSON 响应包装。
     """
     struct ScreenerIndicatorsResponse
-        data::Any
+        data::RawJSON
     end
     StructTypes.StructType(::Type{ScreenerIndicatorsResponse}) = StructTypes.CustomStruct()
     StructTypes.construct(::Type{ScreenerIndicatorsResponse}, obj) =

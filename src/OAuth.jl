@@ -8,7 +8,7 @@ using ..Errors: LongBridgeError
 
 export OAuthToken, OAuthHandle, OAuthBuilder, build,
        is_expired, expires_soon, access_token,
-       load_from_path, save_to_path
+       load_from_path, save_to_path, callback_port!
 
 # ==================== Constants ====================
 
@@ -17,7 +17,6 @@ const OAUTH_AUTHORIZE_PATH = "/oauth2/authorize"
 const OAUTH_TOKEN_PATH = "/oauth2/token"
 const DEFAULT_CALLBACK_PORT = UInt16(60355)
 const DEFAULT_REDIRECT_URI = "http://localhost:60355/callback"
-const TOKEN_DIR = joinpath(pkgdir(parentmodule(@__MODULE__)), ".tokens")
 const AUTH_TIMEOUT = 300.0  # 5 minutes
 const OAUTH_HTTP_CLIENT = HTTP.Client(
     connect_timeout = 10,
@@ -26,13 +25,24 @@ const OAUTH_HTTP_CLIENT = HTTP.Client(
     read_idle_timeout = 30,
 )
 
+function _token_dir()
+    dir = get(ENV, "LONGBRIDGE_TOKEN_DIR", "")
+    !isempty(dir) && return dir
+
+    home = get(ENV, Sys.iswindows() ? "USERPROFILE" : "HOME", "")
+    !isempty(home) && return joinpath(home, ".longbridge", "tokens")
+
+    return joinpath(first(Base.DEPOT_PATH), "longbridge", "tokens")
+end
+
 # ==================== OAuthToken ====================
 
 """
     OAuthToken
 
 Represents an OAuth 2.0 token with access and refresh tokens.
-Persisted as JSON at `<project>/.tokens/<client_id>`.
+Persisted as JSON under `\$LONGBRIDGE_TOKEN_DIR` when set, otherwise under
+the user-level LongBridge token directory.
 """
 struct OAuthToken
     client_id::String
@@ -66,12 +76,13 @@ end
 
 Returns the filesystem path for persisting this client's token.
 """
-token_path(client_id::String) = joinpath(TOKEN_DIR, client_id)
+token_path(client_id::String) = joinpath(_token_dir(), client_id)
 
 """
     save_to_path(token::OAuthToken)
 
-Persist the token to `<project>/.tokens/<client_id>`.
+Persist the token to `\$LONGBRIDGE_TOKEN_DIR/<client_id>` when set, otherwise
+to the user-level LongBridge token directory.
 """
 function save_to_path(token::OAuthToken)
     path = token_path(token.client_id)
@@ -194,7 +205,7 @@ end
 # ==================== Authorization Flow ====================
 
 """
-    authorize!(handle::OAuthHandle, open_url_fn::Function)
+    authorize!(handle::OAuthHandle, open_url_fn)
 
 Run the full browser-based OAuth authorization flow:
 1. Start local HTTP callback server
@@ -202,7 +213,7 @@ Run the full browser-based OAuth authorization flow:
 3. Wait for callback with authorization code
 4. Exchange code for tokens
 """
-function authorize!(handle::OAuthHandle, open_url_fn::Function)
+function authorize!(handle::OAuthHandle, open_url_fn)
     redirect_uri = "http://localhost:$(handle.callback_port)/callback"
     csrf_state = randstring(32)
 
@@ -323,17 +334,20 @@ mutable struct OAuthBuilder
 end
 
 """
-    callback_port(builder::OAuthBuilder, port::Integer) -> OAuthBuilder
+    callback_port!(builder::OAuthBuilder, port::Integer) -> OAuthBuilder
 
 Set the local callback port for the OAuth authorization flow.
 """
-function callback_port(builder::OAuthBuilder, port::Integer)
+function callback_port!(builder::OAuthBuilder, port::Integer)
     builder.callback_port = UInt16(port)
     return builder
 end
 
+# Backwards-compatible alias for older code; prefer callback_port! for new code.
+callback_port(builder::OAuthBuilder, port::Integer) = callback_port!(builder, port)
+
 """
-    build(open_url_fn::Function) -> Function
+    build(open_url_fn) -> Function
 
 Returns a function that takes an OAuthBuilder and completes the OAuth flow:
 1. Check for cached token on disk
@@ -342,7 +356,7 @@ Returns a function that takes an OAuthBuilder and completes the OAuth flow:
 4. If no token → full auth flow
 5. Persist token and return OAuthHandle
 """
-function build(open_url_fn::Function)
+function build(open_url_fn)
     return function(builder::OAuthBuilder)
         handle = OAuthHandle(builder.client_id, builder.callback_port, nothing)
 

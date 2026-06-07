@@ -1,6 +1,6 @@
 """
 LongBridge Julia SDK - Test Script
-(Tests functions individually using the new Actor-based API)
+(Tests functions individually using the Channel-based API)
 """
 
 using LongBridge, Dates

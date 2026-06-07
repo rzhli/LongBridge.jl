@@ -126,6 +126,13 @@ end
          "executed_quantity":"100","executed_price":"172.50","executed_cost":"17250"}"""))
     @test fi.direction === FlowDirection.Buy
     @test fi.executed_quantity == Dec64("100")
+    @test fi.executed_timestamp === nothing
+
+    fi2 = StructTypes.construct(FlowItem, JSON3.read("""
+        {"executed_date":"2026-05-15","executed_timestamp":"1747257600",
+         "code":"AAPL","direction":"sell"}"""))
+    @test fi2.direction === FlowDirection.Sell
+    @test fi2.executed_timestamp == "1747257600"
 
     # 空字段兜底
     bm = StructTypes.construct(ProfitAnalysisByMarket, JSON3.read("""{}"""))

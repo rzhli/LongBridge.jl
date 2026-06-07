@@ -29,9 +29,9 @@ module Config
         app_secret::String
         access_token::String
         token_expire_time::DateTime
-        http_url::Union{String, Nothing}
-        quote_ws_url::Union{String, Nothing}
-        trade_ws_url::Union{String, Nothing}
+        http_url::String
+        quote_ws_url::String
+        trade_ws_url::String
         language::Language.T
         enable_overnight::Bool
         auth_mode::Symbol          # :apikey or :oauth
@@ -42,9 +42,9 @@ module Config
             app_secret::String,
             access_token::String,
             token_expire_time::DateTime;
-            http_url::Union{String, Nothing} = nothing,
-            quote_ws_url::Union{String, Nothing} = nothing,
-            trade_ws_url::Union{String, Nothing} = nothing,
+            http_url::Union{String, Nothing} = DEFAULT_HTTP_URL_CN,
+            quote_ws_url::Union{String, Nothing} = DEFAULT_QUOTE_WS_CN,
+            trade_ws_url::Union{String, Nothing} = DEFAULT_TRADE_WS_CN,
             language::Language.T = Language.ZH_CN,
             enable_overnight::Bool = true   # 美股夜盘交易行情，需订阅US LV1实时行情并开启enable_overnight参数，否则会返回null
         )
@@ -53,9 +53,9 @@ module Config
                 app_secret,
                 access_token,
                 token_expire_time,
-                http_url,
-                quote_ws_url,
-                trade_ws_url,
+                something(http_url, DEFAULT_HTTP_URL_CN),
+                something(quote_ws_url, DEFAULT_QUOTE_WS_CN),
+                something(trade_ws_url, DEFAULT_TRADE_WS_CN),
                 language,
                 enable_overnight,
                 :apikey,
@@ -81,15 +81,15 @@ module Config
             throw(LongBridgeError(404, "Config file not found: $path"))
         end
         
-        # URLs - use Constant defaults
-        http_url = DEFAULT_HTTP_URL_CN
-        quote_ws_url = DEFAULT_QUOTE_WS_CN
-        trade_ws_url = DEFAULT_TRADE_WS_CN
-        
         config_dict = TOML.parsefile(path)
+
+        # URLs - use Constant defaults unless the TOML explicitly overrides them
+        http_url = String(get(config_dict, "http_url", DEFAULT_HTTP_URL_CN))
+        quote_ws_url = String(get(config_dict, "quote_ws_url", DEFAULT_QUOTE_WS_CN))
+        trade_ws_url = String(get(config_dict, "trade_ws_url", DEFAULT_TRADE_WS_CN))
         
         # Required fields
-        required_keys = ["app_key", "app_secret", "access_token"]
+        required_keys = ["app_key", "app_secret", "access_token", "token_expire_time"]
         for key in required_keys
             if !haskey(config_dict, key)
                 throw(LongBridgeError(400, "Missing required config key: $key"))

@@ -1,4 +1,4 @@
-# 共享命令类型，用于 Quote 和 Trade 模块的 Actor 模式
+# 共享命令类型，用于 Quote 和 Trade 后台任务命令循环
 
 module Commands
 

@@ -13,12 +13,13 @@ using JSON3, StructTypes, Dates
     @test c.key == "pettm"
     @test c.min == "0"
     @test c.max == "20"
-    @test c.tech_values isa Dict
+    @test c.tech_values isa Dict{String,Any}
     @test isempty(c.tech_values)
 
     # 含 tech_values（如 MACD 金叉）
     c2 = ScreenerCondition("macd_day"; tech_values=Dict("category"=>"goldenfork","period"=>"day"))
     @test c2.key == "macd_day"
+    @test c2.tech_values isa Dict{String,Any}
     @test c2.tech_values["category"] == "goldenfork"
 end
 

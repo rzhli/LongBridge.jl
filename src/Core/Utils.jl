@@ -3,19 +3,11 @@ module Utils
     using Logging, Dates, JSON3, DataFrames, EnumX
     import DecFP: Dec64
 
-    export to_namedtuple, to_china_time, to_dataframe, safeparse, Arc,
+    export to_namedtuple, to_china_time, to_dataframe, safeparse,
            symbol_to_counter_id, index_symbol_to_counter_id, counter_id_to_symbol,
            lookup_counter_id, cache_counter_ids, is_etf,
            json3_to_mutable,
            Dec64
-
-    # A simple wrapper to mimic Rust's Arc for shared ownership semantics
-    struct Arc{T}
-        value::T
-    end
-
-    Base.getproperty(arc::Arc, sym::Symbol) = getproperty(getfield(arc, :value), sym)
-    Base.setproperty!(arc::Arc, sym::Symbol, x) = setproperty!(getfield(arc, :value), sym, x)
 
     # Utility function to convert UTC timestamp to China time (UTC+8)
     function to_china_time(timestamp::Int64)
@@ -35,7 +27,9 @@ module Utils
         if isempty(data)
             if isstructtype(T) && !isabstracttype(T)
                 fnames = fieldnames(T)
-                return DataFrame([name => [] for name in fnames])
+                return DataFrame([
+                    name => Vector{Union{Missing, fieldtype(T, name)}}() for name in fnames
+                ])
             else
                 return DataFrame()
             end
@@ -45,7 +39,7 @@ module Utils
         n = length(data)
         df = DataFrame()
         for fname in fnames
-            col = Vector{Any}(undef, n)
+            col = Vector{Union{Missing, fieldtype(T, fname)}}(undef, n)
             @inbounds for i in eachindex(data)
                 v = getfield(data[i], fname)
                 col[i] = v === nothing ? missing : v

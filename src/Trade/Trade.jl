@@ -9,7 +9,7 @@ module Trade
     using ..Errors
     using ..TradePush
     using ..TradeProtocol
-    using ..Utils: Arc, to_china_time, safeparse
+    using ..Utils: to_china_time, safeparse
     using ..Commands: AbstractCommand, HttpGetCmd, HttpPostCmd, HttpPutCmd, HttpDeleteCmd, DisconnectCmd
 
     import ..disconnect!
@@ -35,16 +35,74 @@ mutable struct InnerTradeContext
     config::Config.Settings
     ws_client::Union{Client.WSClient,Nothing}
     command_ch::Channel{AbstractCommand}
-    core_task::Union{Task,Nothing}
+    background_task::Union{Task,Nothing}
     callbacks::Callbacks
     subscriptions::Set{String}
 end
 
     struct TradeContext
-        inner::Arc{InnerTradeContext}
+        inner::InnerTradeContext
     end
 
-    function core_run(inner::InnerTradeContext)
+    const REQUEST_WAIT_TIMEOUT = Client.REQUEST_TIMEOUT + 5.0
+
+    function _is_reconnectable_ws_error(e)
+        msg = sprint(showerror, e)
+        return (e isa LongBridgeError && (occursin("WebSocket", e.message) || e.code == 408)) ||
+               (e isa ArgumentError && occursin("WebSocket", msg)) ||
+               e isa EOFError
+    end
+
+    function _submit_command!(ctx::TradeContext, cmd::AbstractCommand)
+        inner = ctx.inner
+        task = inner.background_task
+        if isnothing(task) || istaskdone(task) || !isopen(inner.command_ch)
+            throw(LongBridgeError(500, "Trade background task is not running"))
+        end
+
+        try
+            put!(inner.command_ch, cmd)
+        catch e
+            if e isa InvalidStateException
+                throw(LongBridgeError(500, "Trade command channel is closed"))
+            end
+            rethrow(e)
+        end
+    end
+
+    function _take_task_response!(ch::Channel, context_name::AbstractString)
+        timer = Timer(REQUEST_WAIT_TIMEOUT) do _
+            isopen(ch) && close(ch)
+        end
+
+        try
+            return take!(ch)
+        catch e
+            if e isa InvalidStateException
+                throw(LongBridgeError(408, "$context_name request timed out waiting for background task"))
+            end
+            rethrow(e)
+        finally
+            close(timer)
+        end
+    end
+
+    function _resubscribe_trade!(inner::InnerTradeContext)
+        isempty(inner.subscriptions) && return
+
+        @info "Resubscribing to trade topics..."
+        try
+            req = TradeProtocol.Sub(collect(inner.subscriptions))
+            io_buf = IOBuffer()
+            encoder = PB.ProtoEncoder(io_buf)
+            PB.encode(encoder, req)
+            Client.ws_request(inner.ws_client, UInt8(TradeProtocol.Command.CMD_SUB), take!(io_buf))
+        catch e
+            @error "Failed to resubscribe to trade topics" exception=(e, catch_backtrace())
+        end
+    end
+
+    function run_trade_loop(inner::InnerTradeContext)
         should_run = true
         reconnect_attempts = 0
 
@@ -62,29 +120,26 @@ end
                             @warn "Unknown trade push command" cmd = cmd
                         end
                     end
+                ws.on_reconnect = () -> _resubscribe_trade!(inner)
                 ws.auth_data = Client.create_auth_request(inner.config)
                 Client.connect!(ws)
                 reconnect_attempts = 0
 
                 # Resubscribe to all topics after successful reconnection
-                if !isempty(inner.subscriptions)
-                    @info "Resubscribing to trade topics..."
-                    try
-                        req = TradeProtocol.Sub(collect(inner.subscriptions))
-                        io_buf = IOBuffer()
-                        encoder = PB.ProtoEncoder(io_buf)
-                        PB.encode(encoder, req)
-                        Client.ws_request(inner.ws_client, UInt8(TradeProtocol.Command.CMD_SUB), take!(io_buf))
-                    catch e
-                        @error "Failed to resubscribe to trade topics" exception=(e, catch_backtrace())
-                    end
-                end
+                _resubscribe_trade!(inner)
 
                 while isopen(inner.command_ch)
                     cmd = take!(inner.command_ch)
-                    handle_command(inner, cmd)
+                    reconnect_needed = handle_command(inner, cmd)
                     if cmd isa DisconnectCmd
                         should_run = false
+                        break
+                    elseif reconnect_needed
+                        @warn "Trade WebSocket command failed; reconnecting before processing more commands"
+                        if !isnothing(inner.ws_client)
+                            Client.disconnect!(inner.ws_client)
+                            inner.ws_client = nothing
+                        end
                         break
                     end
                 end
@@ -94,7 +149,7 @@ end
                 elseif e isa LongBridgeError && occursin("WebSocket", e.message)
                     Client.full_reconnect!(inner.ws_client)
                 else
-                    @error "Trade core actor failed" exception = (e, catch_backtrace())
+                    @error "Trade background task failed" exception = (e, catch_backtrace())
                     should_run = false
                 end
             finally
@@ -104,9 +159,11 @@ end
                 end
             end
         end
+        isopen(inner.command_ch) && close(inner.command_ch)
     end
 
     function handle_command(inner::InnerTradeContext, cmd::AbstractCommand)
+        reconnect_needed = false
         resp = try
             if cmd isa DisconnectCmd
                 nothing
@@ -136,6 +193,7 @@ end
                 ApiResponse(Client.http_delete(inner.config, cmd.path; params = cmd.params))
             end
         catch e
+            reconnect_needed = (cmd isa SubscribeCmd || cmd isa UnsubscribeCmd) && _is_reconnectable_ws_error(e)
             @error "Failed to handle command" command = typeof(cmd) exception = (e, catch_backtrace())
             e
         end
@@ -143,15 +201,16 @@ end
         if !(cmd isa DisconnectCmd) && isopen(cmd.resp_ch)
             put!(cmd.resp_ch, resp)
         end
+        return reconnect_needed
     end
 
     function TradeContext(config::Config.Settings)
         command_ch = Channel{AbstractCommand}(32)
 
         inner = InnerTradeContext(config, nothing, command_ch, nothing, Callbacks(), Set{String}())
-        ctx = TradeContext(Arc(inner))
+        ctx = TradeContext(inner)
 
-        inner.core_task = @async core_run(inner)
+        inner.background_task = @async run_trade_loop(inner)
 
         return ctx
     end
@@ -161,31 +220,31 @@ end
     # response type, so we assert it after `take!` and let the compiler
     # propagate the type to call-site field accesses.
     function request(ctx::TradeContext, cmd::SubscribeCmd)
-        put!(ctx.inner.command_ch, cmd)
-        resp = take!(cmd.resp_ch)
+        _submit_command!(ctx, cmd)
+        resp = _take_task_response!(cmd.resp_ch, "Trade")
         resp isa Exception && throw(resp)
         return resp::SubResponse
     end
 
     function request(ctx::TradeContext, cmd::UnsubscribeCmd)
-        put!(ctx.inner.command_ch, cmd)
-        resp = take!(cmd.resp_ch)
+        _submit_command!(ctx, cmd)
+        resp = _take_task_response!(cmd.resp_ch, "Trade")
         resp isa Exception && throw(resp)
         return resp::UnsubResponse
     end
 
     function request(ctx::TradeContext,
                      cmd::Union{HttpGetCmd,HttpPostCmd,HttpPutCmd,HttpDeleteCmd})
-        put!(ctx.inner.command_ch, cmd)
-        resp = take!(cmd.resp_ch)
+        _submit_command!(ctx, cmd)
+        resp = _take_task_response!(cmd.resp_ch, "Trade")
         resp isa Exception && throw(resp)
         return resp::ApiResponse
     end
 
     # Defensive fallback (shouldn't be hit in practice; kept for safety).
     function request(ctx::TradeContext, cmd::AbstractCommand)
-        put!(ctx.inner.command_ch, cmd)
-        resp = take!(cmd.resp_ch)
+        _submit_command!(ctx, cmd)
+        resp = _take_task_response!(cmd.resp_ch, "Trade")
         resp isa Exception && throw(resp)
         return resp
     end
@@ -200,7 +259,7 @@ end
                     d[key] = string(round(Int, datetime2unix(DateTime(val))))
                 elseif val isa Vector && !isempty(val)
                     # Coerce to homogeneous Vector{String} to avoid Union widening
-                    # to Vector{Any} that the previous comprehension produced.
+                    # from the previous broad comprehension.
                     d[key] = String[v isa Enum ? string(Int(v)) : string(v) for v in val]
                 elseif val isa Enum
                     d[key] = Int(val)
@@ -500,10 +559,10 @@ end
 
     function disconnect!(ctx::TradeContext)
         inner = ctx.inner
-        if !isnothing(inner.core_task) && !istaskdone(inner.core_task)
+        if !isnothing(inner.background_task) && !istaskdone(inner.background_task)
             put!(inner.command_ch, DisconnectCmd())
             close(inner.command_ch)
-            wait(inner.core_task)
+            wait(inner.background_task)
         end
     end
 end # module Trade
