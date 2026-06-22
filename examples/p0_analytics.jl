@@ -278,3 +278,42 @@ display(screener_indicators(sc))                           # 可用指标列表
 # conds = [ScreenerCondition("pettm"; min="0", max="20"),
 #          ScreenerCondition("roe";   min="0.1")]
 # display(screener_search(sc, "US"; conditions=conds, page=0, size=20))
+
+# ════════════════════════════════════════════════════════════════════════
+# v0.8.5 新增 —— 宏观经济数据（上游 macrodata v2 对齐）
+# ════════════════════════════════════════════════════════════════════════
+
+fc = FundamentalContext(cfg)
+
+# 1) 宏观经济指标列表（不带过滤，默认前 100 条；count 为总数）
+indicators = macroeconomic_indicators(fc)
+@info "宏观指标总数" count=indicators.count
+for ind in indicators.data[1:min(5, end)]
+    @info "indicator" ind.indicator_code ind.country ind.name ind.periodicity
+end
+
+# 2) 按国家过滤 + 关键字模糊过滤 + 分页（country 用 MacroeconomicCountry 枚举）
+us = macroeconomic_indicators(fc; country=MacroeconomicCountry.UnitedStates, keyword="CPI", offset=0, limit=20)
+display(us)
+# 其他可选：HongKong / China / EuroZone / Japan / Singapore
+# display(macroeconomic_indicators(fc; country=MacroeconomicCountry.China))
+
+# importance 是原始整数（1=低 2=中 3=高），可转枚举
+for ind in us.data
+    imp = LongBridge.FundamentalProtocol._macroeconomic_importance_from_int(ind.importance)
+    imp == MacroeconomicImportance.High && @info "高重要性指标" ind.indicator_code ind.name
+end
+
+# 3) 用列表里拿到的 indicator_code 查历史数据
+if !isempty(us.data)
+    code = us.data[1].indicator_code
+    hist = macroeconomic(fc, code)
+    @info "历史数据" code total=hist.count info_name=hist.info.name
+    for pt in hist.data[1:min(5, end)]
+        @info "data point" pt.period pt.actual_value pt.forecast_value pt.release_at pt.unit
+    end
+end
+
+# 4) 限定日期窗口（接受 "YYYY-MM-DD" 字符串或 Date）+ 分页
+# display(macroeconomic(fc, "US_CPI_YOY"; start_date="2023-01-01", end_date="2024-12-31"))
+# display(macroeconomic(fc, "US_CPI_YOY"; start_date=Date(2023,1,1), end_date=Date(2024,12,31), offset=0, limit=50))

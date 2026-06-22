@@ -389,6 +389,9 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `shareholder_top(ctx, symbol)`: Top-shareholder ranking (raw JSON)
 - `shareholder_detail(ctx, symbol, object_id)`: Holding history for one shareholder object (raw JSON)
 - `valuation_comparison(ctx, symbol, currency; comparison_symbols)`: Valuation comparison (PE/PB/PS) with historical curve
+- `etf_asset_allocation(ctx, symbol)`: ETF asset allocation (holdings / regional / asset class / industry groups, new in v0.8.3)
+- `macroeconomic_indicators(ctx; country, keyword, offset, limit)`: List macroeconomic indicators, optional `MacroeconomicCountry` and fuzzy keyword filters (new in v0.8.5)
+- `macroeconomic(ctx, id; start_date, end_date, offset, limit, sort)`: Historical data for one macroeconomic indicator, newest-first by default (new in v0.8.5)
 
 ### Market (`MarketContext`, new in v0.8.0)
 - `top_movers(ctx, markets, sort, limit; date)`: Top movers across one or more markets (renamed from upstream `stock_events`)

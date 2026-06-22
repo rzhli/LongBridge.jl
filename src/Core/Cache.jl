@@ -8,10 +8,22 @@ module Cache
 
 using Dates
 
-export SimpleCache, CacheWithKey, get_or_update, RealtimeStore,
-       update_quote!, update_depth!, update_brokers!, update_trades!, update_candlesticks!,
-       get_quote, get_depth, get_brokers, get_trades, get_candlesticks,
-       clear_store!, clear_candlesticks!
+export SimpleCache,
+    CacheWithKey,
+    get_or_update,
+    RealtimeStore,
+    update_quote!,
+    update_depth!,
+    update_brokers!,
+    update_trades!,
+    update_candlesticks!,
+    get_quote,
+    get_depth,
+    get_brokers,
+    get_trades,
+    get_candlesticks,
+    clear_store!,
+    clear_candlesticks!
 
 """
 CacheItem
@@ -21,7 +33,7 @@ CacheItem
 mutable struct CacheItem{T}
     data::T
     expires_at::DateTime
-    
+
     function CacheItem(data::T, ttl_seconds::Float64) where {T}
         new{T}(data, now() + Second(floor(Int, ttl_seconds)))
     end
@@ -33,10 +45,10 @@ SimpleCache
 简单缓存，用于缓存单个值。
 """
 mutable struct SimpleCache{T}
-    item::Union{Nothing, CacheItem{T}}
+    item::Union{Nothing,CacheItem{T}}
     ttl_seconds::Float64
 
-    function SimpleCache{T}(ttl_seconds::Float64) where T
+    function SimpleCache{T}(ttl_seconds::Float64) where {T}
         new{T}(nothing, ttl_seconds)
     end
 end
@@ -46,12 +58,12 @@ CacheWithKey
 
 带键的缓存，用于缓存多个值。
 """
-mutable struct CacheWithKey{K, V}
-    items::Dict{K, CacheItem{V}}
+mutable struct CacheWithKey{K,V}
+    items::Dict{K,CacheItem{V}}
     ttl_seconds::Float64
-    
-    function CacheWithKey{K, V}(ttl_seconds::Float64) where {K, V}
-        new(Dict{K, CacheItem{V}}(), ttl_seconds)
+
+    function CacheWithKey{K,V}(ttl_seconds::Float64) where {K,V}
+        new(Dict{K,CacheItem{V}}(), ttl_seconds)
     end
 end
 
@@ -85,12 +97,12 @@ result = get_or_update(cache) do
 end
 ```
 """
-function get_or_update(cache::SimpleCache{T}, update_func::F)::T where {T, F}
+function get_or_update(cache::SimpleCache{T}, update_func::F)::T where {T,F}
     # 检查是否有缓存且未过期
     if !isnothing(cache.item) && !is_expired(cache.item)
         return cache.item.data
     end
-    
+
     # 缓存过期或不存在，更新缓存
     try
         new_data = update_func()
@@ -129,12 +141,12 @@ result = get_or_update(cache, "AAPL.US") do symbol
 end
 ```
 """
-function get_or_update(cache::CacheWithKey{K, V}, key::K, update_func::F)::V where {K, V, F}
+function get_or_update(cache::CacheWithKey{K,V}, key::K, update_func::F)::V where {K,V,F}
     # 检查是否有缓存且未过期
     if haskey(cache.items, key) && !is_expired(cache.items[key])
         return cache.items[key].data
     end
-    
+
     # 缓存过期或不存在，更新缓存
     try
         new_data = update_func(key)
@@ -143,7 +155,10 @@ function get_or_update(cache::CacheWithKey{K, V}, key::K, update_func::F)::V whe
     catch e
         # 如果更新失败，且有旧缓存，则返回旧缓存
         if haskey(cache.items, key)
-            @warn "Cache update failed for key $key, using stale data" exception=(e, catch_backtrace())
+            @warn "Cache update failed for key $key, using stale data" exception=(
+                e,
+                catch_backtrace(),
+            )
             return cache.items[key].data
         else
             rethrow(e)
@@ -183,18 +198,18 @@ cleanup_expired!(cache::CacheWithKey)
 
 清理带键缓存中过期的项。
 """
-function cleanup_expired!(cache::CacheWithKey{K, V}) where {K, V}
+function cleanup_expired!(cache::CacheWithKey{K,V}) where {K,V}
     expired_keys = K[]
     for (key, item) in cache.items
         if is_expired(item)
             push!(expired_keys, key)
         end
     end
-    
+
     for key in expired_keys
         delete!(cache.items, key)
     end
-    
+
     return length(expired_keys)
 end
 
@@ -206,12 +221,8 @@ cache_stats(cache::SimpleCache) -> NamedTuple
 function cache_stats(cache::SimpleCache)
     has_data = !isnothing(cache.item)
     is_valid = has_data && !is_expired(cache.item)
-    
-    return (
-        has_data = has_data,
-        is_valid = is_valid,
-        ttl_seconds = cache.ttl_seconds
-    )
+
+    return (has_data = has_data, is_valid = is_valid, ttl_seconds = cache.ttl_seconds)
 end
 
 """
@@ -223,12 +234,12 @@ function cache_stats(cache::CacheWithKey)
     total_items = length(cache.items)
     expired_items = count(is_expired, values(cache.items))
     valid_items = total_items - expired_items
-    
+
     return (
         total_items = total_items,
         valid_items = valid_items,
         expired_items = expired_items,
-        ttl_seconds = cache.ttl_seconds
+        ttl_seconds = cache.ttl_seconds,
     )
 end
 
@@ -247,15 +258,15 @@ end
 - `B`: Brokers数据类型 (PushBrokers)
 - `T`: Trade数据类型
 """
-mutable struct SecurityData{Q, D, B, T}
-    quote_data::Union{Nothing, Q}
-    depth::Union{Nothing, D}
-    brokers::Union{Nothing, B}
+mutable struct SecurityData{Q,D,B,T}
+    quote_data::Union{Nothing,Q}
+    depth::Union{Nothing,D}
+    brokers::Union{Nothing,B}
     trades::Vector{T}
     max_trades::Int
 
-    function SecurityData{Q, D, B, T}(; max_trades::Int = 500) where {Q, D, B, T}
-        new{Q, D, B, T}(nothing, nothing, nothing, T[], max_trades)
+    function SecurityData{Q,D,B,T}(; max_trades::Int = 500) where {Q,D,B,T}
+        new{Q,D,B,T}(nothing, nothing, nothing, T[], max_trades)
     end
 end
 
@@ -271,7 +282,7 @@ mutable struct CandlestickData{C}
     candlesticks::Vector{C}
     max_count::Int
 
-    function CandlestickData{C}(; max_count::Int = 1000) where C
+    function CandlestickData{C}(; max_count::Int = 1000) where {C}
         new{C}(C[], max_count)
     end
 end
@@ -302,24 +313,24 @@ quote = get_quote(store, "700.HK")
 depth = get_depth(store, "700.HK")
 ```
 """
-mutable struct RealtimeStore{Q, D, B, T, C}
-    securities::Dict{String, SecurityData{Q, D, B, T}}
-    candlesticks::Dict{Tuple{String, Int}, CandlestickData{C}}  # (symbol, period) -> data
+mutable struct RealtimeStore{Q,D,B,T,C}
+    securities::Dict{String,SecurityData{Q,D,B,T}}
+    candlesticks::Dict{Tuple{String,Int},CandlestickData{C}}  # (symbol, period) -> data
     lock::ReentrantLock
 
-    function RealtimeStore{Q, D, B, T, C}() where {Q, D, B, T, C}
-        new{Q, D, B, T, C}(
-            Dict{String, SecurityData{Q, D, B, T}}(),
-            Dict{Tuple{String, Int}, CandlestickData{C}}(),
-            ReentrantLock()
+    function RealtimeStore{Q,D,B,T,C}() where {Q,D,B,T,C}
+        new{Q,D,B,T,C}(
+            Dict{String,SecurityData{Q,D,B,T}}(),
+            Dict{Tuple{String,Int},CandlestickData{C}}(),
+            ReentrantLock(),
         )
     end
 end
 
 # Helper to get or create security data
-function _get_security!(store::RealtimeStore{Q, D, B, T, C}, symbol::String) where {Q, D, B, T, C}
+function _get_security!(store::RealtimeStore{Q,D,B,T,C}, symbol::String) where {Q,D,B,T,C}
     get!(store.securities, symbol) do
-        SecurityData{Q, D, B, T}()
+        SecurityData{Q,D,B,T}()
     end
 end
 
@@ -328,7 +339,11 @@ end
 
 更新证券的实时报价数据。
 """
-function update_quote!(store::RealtimeStore{Q, D, B, T, C}, symbol::String, quote_data::Q) where {Q, D, B, T, C}
+function update_quote!(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+    quote_data::Q,
+) where {Q,D,B,T,C}
     lock(store.lock) do
         security = _get_security!(store, symbol)
         security.quote_data = quote_data
@@ -340,7 +355,11 @@ end
 
 更新证券的盘口深度数据。
 """
-function update_depth!(store::RealtimeStore{Q, D, B, T, C}, symbol::String, depth::D) where {Q, D, B, T, C}
+function update_depth!(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+    depth::D,
+) where {Q,D,B,T,C}
     lock(store.lock) do
         security = _get_security!(store, symbol)
         security.depth = depth
@@ -352,7 +371,11 @@ end
 
 更新证券的经纪队列数据。
 """
-function update_brokers!(store::RealtimeStore{Q, D, B, T, C}, symbol::String, brokers::B) where {Q, D, B, T, C}
+function update_brokers!(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+    brokers::B,
+) where {Q,D,B,T,C}
     lock(store.lock) do
         security = _get_security!(store, symbol)
         security.brokers = brokers
@@ -364,13 +387,17 @@ end
 
 更新证券的成交明细数据。新成交追加到末尾，超过max_trades时删除最旧的数据。
 """
-function update_trades!(store::RealtimeStore{Q, D, B, T, C}, symbol::String, new_trades::Vector{T}) where {Q, D, B, T, C}
+function update_trades!(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+    new_trades::Vector{T},
+) where {Q,D,B,T,C}
     lock(store.lock) do
         security = _get_security!(store, symbol)
         append!(security.trades, new_trades)
         # 保留最新的 max_trades 条记录
         if length(security.trades) > security.max_trades
-            deleteat!(security.trades, 1:(length(security.trades) - security.max_trades))
+            deleteat!(security.trades, 1:(length(security.trades)-security.max_trades))
         end
     end
 end
@@ -380,7 +407,12 @@ end
 
 更新或初始化证券的K线数据。
 """
-function update_candlesticks!(store::RealtimeStore{Q, D, B, T, C}, symbol::String, period::Int, new_candlesticks::Vector{C}) where {Q, D, B, T, C}
+function update_candlesticks!(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+    period::Int,
+    new_candlesticks::Vector{C},
+) where {Q,D,B,T,C}
     lock(store.lock) do
         key = (symbol, period)
         if !haskey(store.candlesticks, key)
@@ -397,7 +429,10 @@ end
 
 获取证券的实时报价数据。
 """
-function get_quote(store::RealtimeStore{Q, D, B, T, C}, symbol::String)::Union{Nothing, Q} where {Q, D, B, T, C}
+function get_quote(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+)::Union{Nothing,Q} where {Q,D,B,T,C}
     lock(store.lock) do
         security = get(store.securities, symbol, nothing)
         isnothing(security) ? nothing : security.quote_data
@@ -409,7 +444,10 @@ end
 
 获取证券的盘口深度数据。
 """
-function get_depth(store::RealtimeStore{Q, D, B, T, C}, symbol::String)::Union{Nothing, D} where {Q, D, B, T, C}
+function get_depth(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+)::Union{Nothing,D} where {Q,D,B,T,C}
     lock(store.lock) do
         security = get(store.securities, symbol, nothing)
         isnothing(security) ? nothing : security.depth
@@ -421,7 +459,10 @@ end
 
 获取证券的经纪队列数据。
 """
-function get_brokers(store::RealtimeStore{Q, D, B, T, C}, symbol::String)::Union{Nothing, B} where {Q, D, B, T, C}
+function get_brokers(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+)::Union{Nothing,B} where {Q,D,B,T,C}
     lock(store.lock) do
         security = get(store.securities, symbol, nothing)
         isnothing(security) ? nothing : security.brokers
@@ -437,7 +478,11 @@ end
 - `symbol::String`: 证券代码
 - `count::Int=0`: 返回的最大条数，0表示返回全部
 """
-function get_trades(store::RealtimeStore{Q, D, B, T, C}, symbol::String; count::Int=0)::Vector{T} where {Q, D, B, T, C}
+function get_trades(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String;
+    count::Int = 0,
+)::Vector{T} where {Q,D,B,T,C}
     lock(store.lock) do
         security = get(store.securities, symbol, nothing)
         if isnothing(security)
@@ -445,7 +490,7 @@ function get_trades(store::RealtimeStore{Q, D, B, T, C}, symbol::String; count::
         end
         trades = security.trades
         if count > 0 && count < length(trades)
-            return trades[end-count+1:end]
+            return trades[(end-count+1):end]
         end
         return copy(trades)
     end
@@ -461,7 +506,12 @@ end
 - `period::Int`: K线周期
 - `count::Int=0`: 返回的最大条数，0表示返回全部
 """
-function get_candlesticks(store::RealtimeStore{Q, D, B, T, C}, symbol::String, period::Int; count::Int=0)::Vector{C} where {Q, D, B, T, C}
+function get_candlesticks(
+    store::RealtimeStore{Q,D,B,T,C},
+    symbol::String,
+    period::Int;
+    count::Int = 0,
+)::Vector{C} where {Q,D,B,T,C}
     lock(store.lock) do
         key = (symbol, period)
         data = get(store.candlesticks, key, nothing)
@@ -470,7 +520,7 @@ function get_candlesticks(store::RealtimeStore{Q, D, B, T, C}, symbol::String, p
         end
         candlesticks = data.candlesticks
         if count > 0 && count < length(candlesticks)
-            return candlesticks[end-count+1:end]
+            return candlesticks[(end-count+1):end]
         end
         return copy(candlesticks)
     end

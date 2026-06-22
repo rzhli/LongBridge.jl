@@ -15,13 +15,11 @@ using ..OAuth: OAuthHandle, access_token as oauth_access_token
 export WSClient, refresh_token, post, put, delete
 
 # HTTP Client Constants
-const DEFAULT_TIMEOUT = (connect=10, read=20, write=20)
+const DEFAULT_TIMEOUT = (connect = 10, read = 20, write = 20)
+const HEARTBEAT_INTERVAL = min(10.0, DEFAULT_TIMEOUT.read / 2)
 const RETRIES = 3
-const HTTP_TRANSPORT = HTTP.Transport(
-    max_idle_per_host = 20,
-    max_idle_total = 20,
-    max_conns_per_host = 20,
-)
+const HTTP_TRANSPORT =
+    HTTP.Transport(max_idle_per_host = 20, max_idle_total = 20, max_conns_per_host = 20)
 const HTTP_CLIENT = HTTP.Client(
     transport = HTTP_TRANSPORT,
     connect_timeout = DEFAULT_TIMEOUT.connect,
@@ -41,7 +39,7 @@ function _websocket_url(url::String)
     query_params = [
         "version=$(Constant.PROTOCOL_VERSION)",
         "codec=$(Constant.CODEC_TYPE)",
-        "platform=$(Constant.PLATFORM_TYPE)"
+        "platform=$(Constant.PLATFORM_TYPE)",
     ]
     return url * "?" * join(query_params, "&")
 end
@@ -54,9 +52,13 @@ sign(method, path, headers, params, body, config) -> Union{String, Nothing}
 Generate API signature for authentication. Returns `nothing` in OAuth mode (empty app_secret).
 """
 function sign(
-    method::String, path::String, headers::Dict{String, String},
-    params::String, body::String, config::Config.Settings
-    )::Union{String, Nothing}
+    method::String,
+    path::String,
+    headers::Dict{String,String},
+    params::String,
+    body::String,
+    config::Config.Settings,
+)::Union{String,Nothing}
 
     # OAuth mode: no HMAC signature needed
     if isempty(config.app_secret)
@@ -77,7 +79,7 @@ function sign(
         signed_headers = "x-api-key;x-timestamp"
         signed_values = "x-api-key:$(app_key)\nx-timestamp:$(timestamp)\n"
     end
-    
+
     # 构建待签名字符串
     query = params  # 查询参数
 
@@ -93,10 +95,10 @@ function sign(
 
     # 最终的待签名字符串
     final_str_to_sign = string("HMAC-SHA256|", bytes2hex(SHA.sha1(str_to_sign)))
-    
+
     # 使用HMAC-SHA256生成签名
     signature = bytes2hex(SHA.hmac_sha256(Vector{UInt8}(app_secret), final_str_to_sign))
-    
+
     return "HMAC-SHA256 SignedHeaders=$(signed_headers), Signature=$(signature)"
 end
 
@@ -119,9 +121,13 @@ function _build_query_string(params::Dict{String,Any})
 end
 
 # 通用 HTTP 请求函数
-function _http_request(config::Config.Settings, method::String, path::String;
-                       params::Dict{String,Any}=Dict{String,Any}(),
-                       body::Union{Dict,Nothing}=nothing)
+function _http_request(
+    config::Config.Settings,
+    method::String,
+    path::String;
+    params::Dict{String,Any} = Dict{String,Any}(),
+    body::Union{Dict,Nothing} = nothing,
+)
     try
         base_url = config.http_url
         query_string = _build_query_string(params)
@@ -131,19 +137,19 @@ function _http_request(config::Config.Settings, method::String, path::String;
         if config.auth_mode == :oauth
             # OAuth mode: Bearer token, no HMAC signature
             token = oauth_access_token(config.oauth)
-            headers = Dict{String, String}(
+            headers = Dict{String,String}(
                 "X-Api-Key" => config.app_key,
                 "Authorization" => "Bearer $token",
-                "Content-Type" => "application/json; charset=utf-8"
+                "Content-Type" => "application/json; charset=utf-8",
             )
         else
             # API Key mode: HMAC-SHA256 signature
             timestamp = string(floor(Int, time() * 1000))
-            headers = Dict{String, String}(
+            headers = Dict{String,String}(
                 "X-Api-Key" => config.app_key,
                 "Authorization" => config.access_token,
                 "X-Timestamp" => timestamp,
-                "Content-Type" => "application/json; charset=utf-8"
+                "Content-Type" => "application/json; charset=utf-8",
             )
             signature = sign(method, path, headers, query_string, body_str, config)
             if !isnothing(signature)
@@ -152,16 +158,22 @@ function _http_request(config::Config.Settings, method::String, path::String;
         end
 
         if method == "GET"
-            return HTTP.get(full_url; headers, client=HTTP_CLIENT, retries=RETRIES)
+            return HTTP.get(full_url; headers, client = HTTP_CLIENT, retries = RETRIES)
         elseif method == "DELETE"
             # DELETE 可带 body（Alert/Sharelist 等接口需要）
-            kw = isnothing(body) ?
-                (; headers, client=HTTP_CLIENT, retries=RETRIES) :
-                (; headers, body=body_str, client=HTTP_CLIENT, retries=RETRIES)
+            kw =
+                isnothing(body) ? (; headers, client = HTTP_CLIENT, retries = RETRIES) :
+                (; headers, body = body_str, client = HTTP_CLIENT, retries = RETRIES)
             return HTTP.delete(full_url; kw...)
         else
             http_fn = method == "POST" ? HTTP.post : HTTP.put
-            return http_fn(full_url; headers, body=body_str, client=HTTP_CLIENT, retries=RETRIES)
+            return http_fn(
+                full_url;
+                headers,
+                body = body_str,
+                client = HTTP_CLIENT,
+                retries = RETRIES,
+            )
         end
     catch e
         @error "HTTP $method 请求异常" path=path exception=(e, catch_backtrace())
@@ -169,19 +181,24 @@ function _http_request(config::Config.Settings, method::String, path::String;
     end
 end
 
-http_get(config::Config.Settings, path::String; params::Dict{String,Any}=Dict{String,Any}()) =
-    _http_request(config, "GET", path; params)
+http_get(
+    config::Config.Settings,
+    path::String;
+    params::Dict{String,Any} = Dict{String,Any}(),
+) = _http_request(config, "GET", path; params)
 
-http_post(config::Config.Settings, path::String; body::Dict=Dict()) =
+http_post(config::Config.Settings, path::String; body::Dict = Dict()) =
     _http_request(config, "POST", path; body)
 
-http_put(config::Config.Settings, path::String; body::Dict=Dict()) =
+http_put(config::Config.Settings, path::String; body::Dict = Dict()) =
     _http_request(config, "PUT", path; body)
 
-http_delete(config::Config.Settings, path::String;
-            params::Dict{String,Any}=Dict{String,Any}(),
-            body::Union{Dict,Nothing}=nothing) =
-    _http_request(config, "DELETE", path; params, body)
+http_delete(
+    config::Config.Settings,
+    path::String;
+    params::Dict{String,Any} = Dict{String,Any}(),
+    body::Union{Dict,Nothing} = nothing,
+) = _http_request(config, "DELETE", path; params, body)
 
 """
 refresh_token(config::Config.Settings, expired_at::String) -> Dict
@@ -198,7 +215,7 @@ Reference: https://open.longportapp.com/zh-CN/docs/refresh-token-api
 function refresh_token(config::Config.Settings, expired_at::String)::Dict
     try
         params = Dict("expired_at" => expired_at)
-        result = ApiResponse(http_get(config, "/v1/token/refresh"; params=params))
+        result = ApiResponse(http_get(config, "/v1/token/refresh"; params = params))
         return result.data
     catch e
         @error "刷新Token失败" exception=(e, catch_backtrace())
@@ -218,15 +235,13 @@ Returns:
   - limit: Int - Total connection limit
   - online: Int - Current online connections
 """
-function get_otp(config::Config.Settings)::NamedTuple{(:otp, :limit, :online), Tuple{String, Int, Int}}
+function get_otp(
+    config::Config.Settings,
+)::NamedTuple{(:otp, :limit, :online),Tuple{String,Int,Int}}
     try
         resp = ApiResponse(http_get(config, "/v1/socket/token"))
         if resp.code == 0
-            return (
-                otp = resp.data.otp,
-                limit = resp.data.limit,
-                online = resp.data.online
-            )
+            return (otp = resp.data.otp, limit = resp.data.limit, online = resp.data.online)
         else
             @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
         end
@@ -253,20 +268,20 @@ WebSocket 客户端，用于与长桥服务器建立长连接。
 - `auth_data::Union{Nothing,Vector{UInt8}}`: 认证数据
 """
 mutable struct WSClient
-    ws::Union{Nothing, WebSockets.WebSocket}
+    ws::Union{Nothing,WebSockets.WebSocket}
     url::String
     connected::Bool
     seq_id::UInt32
-    session_id::Union{String, Nothing}
-    pending::Dict{UInt32, Channel{Tuple{UInt8, Vector{UInt8}}}}
+    session_id::Union{String,Nothing}
+    pending::Dict{UInt32,Channel{Tuple{UInt8,Vector{UInt8}}}}
     send_lock::ReentrantLock
     auth_event::Threads.Event
     auth_data::Union{Nothing,Vector{UInt8}}
-    on_push::Union{Function, Nothing}
-    on_reconnect::Union{Function, Nothing}
-    heartbeat_task::Union{Nothing, Task}
+    on_push::Union{Function,Nothing}
+    on_reconnect::Union{Function,Nothing}
+    heartbeat_task::Union{Nothing,Task}
     reconnect_attempts::Int
-    reconnect_task::Union{Nothing, Task}
+    reconnect_task::Union{Nothing,Task}
     config::Config.Settings
 
     function WSClient(url::String, config::Config.Settings)
@@ -276,7 +291,7 @@ mutable struct WSClient
             false,                  # connected (只有认证成功后才为true)
             UInt32(1),              # seq_id
             nothing,                # session_id
-            Dict{UInt32, Channel{Tuple{UInt8, Vector{UInt8}}}}(), # pending
+            Dict{UInt32,Channel{Tuple{UInt8,Vector{UInt8}}}}(), # pending
             ReentrantLock(),        # send_lock
             Threads.Event(),        # auth_event (set after successful auth)
             nothing,                # auth_data
@@ -285,7 +300,7 @@ mutable struct WSClient
             nothing,                # heartbeat_task
             0,                      # reconnect_attempts
             nothing,                # reconnect_task
-            config
+            config,
         )
     end
 end
@@ -339,7 +354,15 @@ function connect!(client::WSClient)
     # 等待认证完成（最多 30s）。
     # 在认证响应到达消息循环时，notify(auth_event) 会立即唤醒此处。
     timer = Timer(30.0)
-    waiter = @async (try; wait(timer); notify(client.auth_event); catch; end)
+    waiter = @async (
+        try
+            ;
+            wait(timer);
+            notify(client.auth_event);
+        catch
+            ;
+        end
+    )
     try
         wait(client.auth_event)
     finally
@@ -374,12 +397,12 @@ function disconnect!(client::WSClient)
     @info "正在断开 WebSocket 连接..." session_id=client.session_id
 
     if !isnothing(client.heartbeat_task) && !istaskdone(client.heartbeat_task)
-        schedule(client.heartbeat_task, InterruptException(); error=true)
+        schedule(client.heartbeat_task, InterruptException(); error = true)
         client.heartbeat_task = nothing
     end
 
     if !isnothing(client.reconnect_task) && !istaskdone(client.reconnect_task)
-        schedule(client.reconnect_task, InterruptException(); error=true)
+        schedule(client.reconnect_task, InterruptException(); error = true)
         client.reconnect_task = nothing
     end
 
@@ -392,7 +415,7 @@ function disconnect!(client::WSClient)
     end
 
     client.ws = nothing
-    
+
     @info "WebSocket 连接已关闭" session_id=client.session_id
 end
 
@@ -416,7 +439,12 @@ function send_request_packet(client::WSClient, cmd::UInt8, body::Vector{UInt8})
 end
 
 # Internal: build and ship a single request frame. Caller must hold send_lock.
-function _write_request_frame(client::WSClient, cmd::UInt8, body::Vector{UInt8}, request_id::UInt32)
+function _write_request_frame(
+    client::WSClient,
+    cmd::UInt8,
+    body::Vector{UInt8},
+    request_id::UInt32,
+)
     body_len = length(body)
     packet = IOBuffer(sizehint = 11 + body_len)
 
@@ -448,8 +476,8 @@ function start_heartbeat_loop(client::WSClient)
         try
             @info "启动心跳循环"
             while client.connected && client.ws === ws && _ws_is_open(ws)
-                sleep(30) # Send a ping every 30 seconds
-                
+                sleep(HEARTBEAT_INTERVAL)
+
                 try
                     # Use WebSocket's built-in ping for network-level keep-alive
                     WebSockets.ping(ws)
@@ -485,7 +513,7 @@ function start_message_loop(client::WSClient)
 
     @async begin
         try
-            @info "启动消息处理循环" 
+            @info "启动消息处理循环"
             # 使用HTTP.jl推荐的WebSocket消息循环模式
             try
                 for msg in ws
@@ -498,16 +526,16 @@ function start_message_loop(client::WSClient)
                         @warn "未知消息类型，已忽略" type=typeof(msg)
                         continue
                     end
-                    
+
                     if length(data) < 5  # 最小包头长度: header(1) + cmd(1) + body_len(3)
                         @warn "包长度小于5，忽略" length=length(data)
                         continue
                     end
-                    
+
                     # 解析包头
                     io = IOBuffer(data)
                     header_byte = read(io, UInt8)
-                
+
                     # Format: [reserve(2)] + [gzip(1)] + [verify(1)] + [type(4)]
                     packet_type = header_byte & 0x0F  # Lower 4 bits
                     is_gzipped = (header_byte & 0x20) != 0
@@ -519,35 +547,42 @@ function start_message_loop(client::WSClient)
                             @warn "响应包长度小于10，忽略" length=length(data)
                             continue
                         end
-                        
+
                         cmd = read(io, UInt8)
                         request_id = ntoh(read(io, UInt32))
                         status_code = read(io, UInt8)
-                        
+
                         # 读取body_len (3 bytes)
                         body_len_bytes = read(io, 3)
-                        body_len = (UInt32(body_len_bytes[1]) << 16) | (UInt32(body_len_bytes[2]) << 8) | UInt32(body_len_bytes[3])
-                        
+                        body_len =
+                            (UInt32(body_len_bytes[1]) << 16) |
+                            (UInt32(body_len_bytes[2]) << 8) | UInt32(body_len_bytes[3])
+
                         @debug "解析包头" cmd=cmd request_id=request_id status_code=status_code body_len=body_len
                         if body_len > length(data) - 10
-                            @warn "body_len声明超出实际剩余长度" body_len=body_len remaining=length(data)-10
+                            @warn "body_len声明超出实际剩余长度" body_len=body_len remaining=length(
+                                data,
+                            )-10
                             continue
                         end
-                        
+
                         # 读取包体
                         body = read(io, body_len)
 
                         if is_gzipped
                             body = transcode(GzipDecompressor, body)
                         end
-                        
+
                         # @info "收到响应数据包" cmd=cmd request_id=request_id status_code=status_code body_len=body_len hex_preview=bytes2hex(body[1:20])
-                        
+
                         # 处理认证响应
                         if cmd == COMMAND_CODE_AUTH
                             if status_code == 0
                                 client.connected = true  # 只有认证成功后才算真正连接
-                                auth_resp = ControlProtocol.decode(body, ControlProtocol.AuthResponse)
+                                auth_resp = ControlProtocol.decode(
+                                    body,
+                                    ControlProtocol.AuthResponse,
+                                )
                                 client.session_id = auth_resp.session_id
                                 @info "认证成功，连接已建立" session_id=client.session_id
                                 # 只有在认证成功后才启动心跳
@@ -558,7 +593,7 @@ function start_message_loop(client::WSClient)
                             end
                             notify(client.auth_event)  # 唤醒 connect! 中的等待者
                         end
-                        
+
                         # 派发响应到等待的 channel（如果有 ws_request 在等）
                         ch = lock(client.send_lock) do
                             get(client.pending, request_id, nothing)
@@ -578,29 +613,36 @@ function start_message_loop(client::WSClient)
                             @warn "推送包长度小于5，忽略" length=length(data)
                             continue
                         end
-                        
+
                         cmd = read(io, UInt8)
-                        
+
                         # 读取body_len (3 bytes)
                         body_len_bytes = read(io, 3)
-                        body_len = (UInt32(body_len_bytes[1]) << 16) | (UInt32(body_len_bytes[2]) << 8) | UInt32(body_len_bytes[3])
-                        
+                        body_len =
+                            (UInt32(body_len_bytes[1]) << 16) |
+                            (UInt32(body_len_bytes[2]) << 8) | UInt32(body_len_bytes[3])
+
                         @debug "解析推送包头" cmd=cmd body_len=body_len
                         if body_len > length(data) - 5
-                            @warn "推送包body_len声明超出实际剩余长度" body_len=body_len remaining=length(data)-5
+                            @warn "推送包body_len声明超出实际剩余长度" body_len=body_len remaining=length(
+                                data,
+                            )-5
                             continue
                         end
-                        
+
                         # 读取包体
                         body = read(io, body_len)
-                        
+
                         # @info "收到推送数据包" cmd=cmd body_len=body_len hex_preview=bytes2hex(body[1:20])
                         if cmd == COMMAND_CODE_CLOSE
                             close_msg = ControlProtocol.decode(body, ControlProtocol.Close)
                             @warn "收到服务器关闭连接指令" code=close_msg.code reason=close_msg.reason
                             client.ws === ws && disconnect!(client)
                         elseif cmd == COMMAND_CODE_RECONNECT
-                            reconnect_msg = ControlProtocol.decode(body, ControlProtocol.ReconnectRequest)
+                            reconnect_msg = ControlProtocol.decode(
+                                body,
+                                ControlProtocol.ReconnectRequest,
+                            )
                             @warn "收到服务器重连指令" session_id=reconnect_msg.session_id
                             client.ws === ws && reconnect!(client)
                         elseif !isnothing(client.on_push)
@@ -624,7 +666,7 @@ function start_message_loop(client::WSClient)
                     @error "消息循环异常" exception=(e, catch_backtrace())
                     client.ws === ws && disconnect!(client)
                 end
-            end            
+            end
         catch e
             @error "消息循环外层异常" exception=(e, catch_backtrace())
         finally
@@ -647,7 +689,7 @@ function reconnect!(client::WSClient)
     @info "尝试使用 session_id 进行快速重连..."
 
     if !isnothing(client.heartbeat_task) && !istaskdone(client.heartbeat_task)
-        schedule(client.heartbeat_task, InterruptException(); error=true)
+        schedule(client.heartbeat_task, InterruptException(); error = true)
         client.heartbeat_task = nothing
     end
 
@@ -674,25 +716,27 @@ function reconnect!(client::WSClient)
                 # ws_request relies on the message loop to dispatch the
                 # reconnect response into client.pending.
                 start_message_loop(client)
-            
+
                 # 2. 发送 ReconnectRequest
                 metadata = Dict("client_version" => Constant.DEFAULT_CLIENT_VERSION)
                 if client.config.enable_overnight
                     metadata["need_over_night_quote"] = "true"
                 end
-                reconnect_req = ControlProtocol.ReconnectRequest(client.session_id, metadata)
+                reconnect_req =
+                    ControlProtocol.ReconnectRequest(client.session_id, metadata)
                 req_body = ControlProtocol.encode(reconnect_req)
 
                 # 使用 ws_request 发送并等待响应
                 resp_body = ws_request(client, COMMAND_CODE_RECONNECT, req_body)
 
                 # 3. 处理响应
-                reconnect_resp = ControlProtocol.decode(resp_body, ControlProtocol.ReconnectResponse)
+                reconnect_resp =
+                    ControlProtocol.decode(resp_body, ControlProtocol.ReconnectResponse)
 
                 client.connected = true
                 client.session_id = reconnect_resp.session_id # 更新 session_id
                 @info "快速重连成功" new_session_id=client.session_id
-            
+
                 reconnect_ok[] = true
                 notify(client.auth_event)
                 notify(reconnect_event)
@@ -750,9 +794,9 @@ function full_reconnect!(client::WSClient)
 
     client.reconnect_task = @async begin
         disconnect!(client)
-        
+
         max_attempts = 5
-        for attempt in 1:max_attempts
+        for attempt = 1:max_attempts
             client.reconnect_attempts = attempt
             @info "尝试完全重连 (第 $attempt/$max_attempts 次)..."
             try
@@ -772,13 +816,13 @@ function full_reconnect!(client::WSClient)
             catch e
                 @warn "完全重连失败" exception=(e, catch_backtrace())
             end
-            
+
             # Exponential backoff
             sleep_duration = 2.0^attempt
             @info "等待 $sleep_duration 秒后重试"
             sleep(sleep_duration)
         end
-        
+
         @error "完全重连 $max_attempts 次后仍然失败，放弃重连"
         client.reconnect_attempts = 0
     end
@@ -795,24 +839,23 @@ Automatically gets OTP token for WebSocket authentication.
 function create_auth_request(config::Config.Settings)::Vector{UInt8}
     # 获取OTP令牌用于WebSocket认证
     otp_response = get_otp(config)
-    
+
     metadata = Dict("client_version" => Constant.DEFAULT_CLIENT_VERSION)
     if config.enable_overnight
         metadata["need_over_night_quote"] = "true"
     end
-    
-    auth_req = ControlProtocol.AuthRequest(
-        otp_response.otp,
-        metadata
-    )
+
+    auth_req = ControlProtocol.AuthRequest(otp_response.otp, metadata)
     return ControlProtocol.encode(auth_req)
 end
 
 # 使用已有WSClient的版本
 function ws_request(
-    client::WSClient, command_code::UInt8, request_body::Vector{UInt8};
-    timeout::Float64 = REQUEST_TIMEOUT
-    )::Vector{UInt8}
+    client::WSClient,
+    command_code::UInt8,
+    request_body::Vector{UInt8};
+    timeout::Float64 = REQUEST_TIMEOUT,
+)::Vector{UInt8}
 
     if !client.connected
         throw(ArgumentError("WebSocket客户端未连接"))
@@ -823,7 +866,7 @@ function ws_request(
 
     # 在持锁状态下：分配 seq_id、注册 channel、发送数据包。
     # 这避免了响应在 send 完成与 register 之间到达造成的丢失。
-    ch = Channel{Tuple{UInt8, Vector{UInt8}}}(1)
+    ch = Channel{Tuple{UInt8,Vector{UInt8}}}(1)
     request_id = lock(client.send_lock) do
         rid = client.seq_id
         client.seq_id += UInt32(1)
@@ -851,7 +894,9 @@ function ws_request(
         end
 
         if status_code != 0
-            @debug "尝试解析错误响应" status_code=status_code response_body_length=length(response_body) response_body_hex=bytes2hex(response_body)
+            @debug "尝试解析错误响应" status_code=status_code response_body_length=length(
+                response_body,
+            ) response_body_hex=bytes2hex(response_body)
             if isempty(response_body)
                 throw(ArgumentError("空的响应体，无法解析错误信息"))
             end

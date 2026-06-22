@@ -417,6 +417,9 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `shareholder_top(ctx, symbol)`: 主要股东排行（原始 JSON）
 - `shareholder_detail(ctx, symbol, object_id)`: 指定股东对象的持仓明细（原始 JSON）
 - `valuation_comparison(ctx, symbol, currency; comparison_symbols)`: 估值对比（PE/PB/PS 含历史曲线）
+- `etf_asset_allocation(ctx, symbol)`: ETF 资产配置（holdings / regional / asset class / industry 分组，v0.8.3 新增）
+- `macroeconomic_indicators(ctx; country, keyword, offset, limit)`: 宏观经济指标列表，可按 `MacroeconomicCountry` 和关键字模糊过滤（v0.8.5 新增）
+- `macroeconomic(ctx, id; start_date, end_date, offset, limit, sort)`: 指定宏观指标的历史数据，默认最新数据在前（v0.8.5 新增）
 
 ### 市场数据（MarketContext，v0.8.0 新增）
 - `top_movers(ctx, markets, sort, limit; date)`: 异动榜（对应上游重命名后的 `stock_events`）

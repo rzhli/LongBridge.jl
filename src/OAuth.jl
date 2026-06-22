@@ -6,9 +6,16 @@ using Base.Threads: ReentrantLock
 using ..Constant
 using ..Errors: LongBridgeError
 
-export OAuthToken, OAuthHandle, OAuthBuilder, build,
-       is_expired, expires_soon, access_token,
-       load_from_path, save_to_path, callback_port!
+export OAuthToken,
+    OAuthHandle,
+    OAuthBuilder,
+    build,
+    is_expired,
+    expires_soon,
+    access_token,
+    load_from_path,
+    save_to_path,
+    callback_port!
 
 # ==================== Constants ====================
 
@@ -47,7 +54,7 @@ the user-level LongBridge token directory.
 struct OAuthToken
     client_id::String
     access_token::String
-    refresh_token::Union{String, Nothing}
+    refresh_token::Union{String,Nothing}
     expires_at::UInt64  # unix timestamp
 end
 
@@ -98,7 +105,7 @@ end
 
 Load a cached token from disk. Returns `nothing` if no cached token exists.
 """
-function load_from_path(client_id::String)::Union{OAuthToken, Nothing}
+function load_from_path(client_id::String)::Union{OAuthToken,Nothing}
     path = token_path(client_id)
     isfile(path) || return nothing
     try
@@ -121,10 +128,14 @@ Thread-safe via ReentrantLock on the token field.
 mutable struct OAuthHandle
     client_id::String
     callback_port::UInt16
-    token::Union{OAuthToken, Nothing}
+    token::Union{OAuthToken,Nothing}
     lock::ReentrantLock
 
-    function OAuthHandle(client_id::String, callback_port::UInt16, token::Union{OAuthToken, Nothing})
+    function OAuthHandle(
+        client_id::String,
+        callback_port::UInt16,
+        token::Union{OAuthToken,Nothing},
+    )
         new(client_id, callback_port, token, ReentrantLock())
     end
 end
@@ -149,11 +160,23 @@ function access_token(handle::OAuthHandle)::String
                 catch e
                     @warn "Token refresh failed" exception=e
                     if is_expired(token)
-                        throw(LongBridgeError(401, "OAuth token expired and refresh failed: $e", nothing))
+                        throw(
+                            LongBridgeError(
+                                401,
+                                "OAuth token expired and refresh failed: $e",
+                                nothing,
+                            ),
+                        )
                     end
                 end
             elseif is_expired(token)
-                throw(LongBridgeError(401, "OAuth token expired and no refresh token available", nothing))
+                throw(
+                    LongBridgeError(
+                        401,
+                        "OAuth token expired and no refresh token available",
+                        nothing,
+                    ),
+                )
             end
         end
 
@@ -179,12 +202,14 @@ function refresh_token!(handle::OAuthHandle)
         OAUTH_BASE_URL * OAUTH_TOKEN_PATH;
         client = OAUTH_HTTP_CLIENT,
         headers = ["Content-Type" => "application/x-www-form-urlencoded"],
-        body = HTTP.URIs.escapeuri(Dict(
-            "grant_type" => "refresh_token",
-            "refresh_token" => token.refresh_token,
-            "client_id" => handle.client_id,
-            "redirect_uri" => redirect_uri
-        ))
+        body = HTTP.URIs.escapeuri(
+            Dict(
+                "grant_type" => "refresh_token",
+                "refresh_token" => token.refresh_token,
+                "client_id" => handle.client_id,
+                "redirect_uri" => redirect_uri,
+            ),
+        ),
     )
 
     data = JSON3.read(String(resp.body))
@@ -194,7 +219,7 @@ function refresh_token!(handle::OAuthHandle)
         handle.client_id,
         data.access_token,
         new_refresh,
-        UInt64(data.expires_in) + UInt64(floor(time()))
+        UInt64(data.expires_in) + UInt64(floor(time())),
     )
 
     handle.token = new_token
@@ -218,22 +243,24 @@ function authorize!(handle::OAuthHandle, open_url_fn)
     csrf_state = randstring(32)
 
     auth_url = string(
-        OAUTH_BASE_URL, OAUTH_AUTHORIZE_PATH,
-        "?client_id=", HTTP.URIs.escapeuri(handle.client_id),
-        "&redirect_uri=", HTTP.URIs.escapeuri(redirect_uri),
+        OAUTH_BASE_URL,
+        OAUTH_AUTHORIZE_PATH,
+        "?client_id=",
+        HTTP.URIs.escapeuri(handle.client_id),
+        "&redirect_uri=",
+        HTTP.URIs.escapeuri(redirect_uri),
         "&response_type=code",
-        "&state=", HTTP.URIs.escapeuri(csrf_state),
-        "&scope=openapi"
+        "&state=",
+        HTTP.URIs.escapeuri(csrf_state),
+        "&scope=openapi",
     )
 
     # 单一结果通道，避免轮询多个 channel
     # value: (:ok, code) on success, (:err, msg) on failure/timeout
-    result_ch = Channel{Tuple{Symbol, String}}(1)
+    result_ch = Channel{Tuple{Symbol,String}}(1)
 
     # Start callback server
-    server = HTTP.serve!(
-        "0.0.0.0", Int(handle.callback_port)
-    ) do request::HTTP.Request
+    server = HTTP.serve!("0.0.0.0", Int(handle.callback_port)) do request::HTTP.Request
         uri = HTTP.URI(request.target)
         if startswith(uri.path, "/callback")
             params = HTTP.queryparams(uri)
@@ -243,7 +270,10 @@ function authorize!(handle::OAuthHandle, open_url_fn)
 
             if !isempty(err)
                 isopen(result_ch) && put!(result_ch, (:err, err))
-                return HTTP.Response(200; body = "Authorization failed: $err. You can close this window.")
+                return HTTP.Response(
+                    200;
+                    body = "Authorization failed: $err. You can close this window.",
+                )
             end
 
             if state != csrf_state
@@ -252,12 +282,16 @@ function authorize!(handle::OAuthHandle, open_url_fn)
             end
 
             if isempty(code)
-                isopen(result_ch) && put!(result_ch, (:err, "No authorization code received"))
+                isopen(result_ch) &&
+                    put!(result_ch, (:err, "No authorization code received"))
                 return HTTP.Response(400; body = "No authorization code received.")
             end
 
             isopen(result_ch) && put!(result_ch, (:ok, code))
-            return HTTP.Response(200; body = "Authorization successful! You can close this window.")
+            return HTTP.Response(
+                200;
+                body = "Authorization successful! You can close this window.",
+            )
         end
         return HTTP.Response(404; body = "Not Found")
     end
@@ -268,7 +302,10 @@ function authorize!(handle::OAuthHandle, open_url_fn)
 
         # Race a timeout against the callback by putting an :err onto the same channel.
         timer = Timer(AUTH_TIMEOUT) do _
-            isopen(result_ch) && put!(result_ch, (:err, "Authorization timed out after $(Int(AUTH_TIMEOUT)) seconds"))
+            isopen(result_ch) && put!(
+                result_ch,
+                (:err, "Authorization timed out after $(Int(AUTH_TIMEOUT)) seconds"),
+            )
         end
 
         kind, payload = try
@@ -288,12 +325,14 @@ function authorize!(handle::OAuthHandle, open_url_fn)
             OAUTH_BASE_URL * OAUTH_TOKEN_PATH;
             client = OAUTH_HTTP_CLIENT,
             headers = ["Content-Type" => "application/x-www-form-urlencoded"],
-            body = HTTP.URIs.escapeuri(Dict(
-                "grant_type" => "authorization_code",
-                "code" => auth_code,
-                "client_id" => handle.client_id,
-                "redirect_uri" => redirect_uri
-            ))
+            body = HTTP.URIs.escapeuri(
+                Dict(
+                    "grant_type" => "authorization_code",
+                    "code" => auth_code,
+                    "client_id" => handle.client_id,
+                    "redirect_uri" => redirect_uri,
+                ),
+            ),
         )
 
         data = JSON3.read(String(resp.body))
@@ -302,7 +341,7 @@ function authorize!(handle::OAuthHandle, open_url_fn)
             handle.client_id,
             data.access_token,
             get(data, :refresh_token, nothing),
-            UInt64(data.expires_in) + UInt64(floor(time()))
+            UInt64(data.expires_in) + UInt64(floor(time())),
         )
 
         handle.token = new_token
@@ -357,7 +396,7 @@ Returns a function that takes an OAuthBuilder and completes the OAuth flow:
 5. Persist token and return OAuthHandle
 """
 function build(open_url_fn)
-    return function(builder::OAuthBuilder)
+    return function (builder::OAuthBuilder)
         handle = OAuthHandle(builder.client_id, builder.callback_port, nothing)
 
         # Try loading cached token

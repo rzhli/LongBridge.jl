@@ -1,5 +1,20 @@
 # Release Notes
 
+## v0.8.5 (2026-06-22)
+
+### New Features — 跟进上游 LongBridge OpenAPI（2 个 macrodata Fundamental API）
+
+- **`FundamentalContext.macroeconomic_indicators(ctx; country=nothing, keyword=nothing, offset=nothing, limit=nothing)`**：宏观经济指标列表，对应 `GET /v2/quote/macrodata`，返回 `MacroeconomicIndicatorListResponse`（`data` 指标列表 + `count` 总数）。`country` 为 `MacroeconomicCountry.T` 枚举（`HongKong` / `China` / `UnitedStates` / `EuroZone` / `Japan` / `Singapore`），内部转 API 要求的全名（如 `"United States"`）；`keyword` 为指标名称模糊过滤。
+- **`FundamentalContext.macroeconomic(ctx, id; start_date=nothing, end_date=nothing, offset=nothing, limit=nothing, sort="desc")`**：指定指标的历史数据，对应 `GET /v2/quote/macrodata/{id}`，返回 `MacroeconomicResponse`（`info` 元数据 + `data` 数据点 + `count` 总数）。`start_date`/`end_date` 接受 `"YYYY-MM-DD"` 字符串或 `Date`，内部转 `start_time`/`end_time`（`T00:00:00Z` / `T23:59:59Z`）；默认 `sort="desc"`，最新数据在前。
+- **新增类型**：`MacroeconomicCountry`、`MacroeconomicImportance`（Low=1 / Medium=2 / High=3）、`MacroeconomicIndicator`、`MacroeconomicIndicatorListResponse`、`Macroeconomic`、`MacroeconomicResponse`。
+- **字符串字段**：`MacroeconomicIndicator.name` / `.describe`、`Macroeconomic.unit` / `.unit_prefix` 均为 `String`；这些字段为 `null` 时兜底为空字符串，`MacroeconomicResponse.info` 为 `null` 时兜底为空结构。
+- `release_at` / `next_release_at` / `start_date` 等 RFC3339 时间戳解析为 UTC `DateTime`（`Union{DateTime,Nothing}`，空串/null 为 `nothing`）。
+- `test/test_v0_8_5_sync.jl`（9 个 testset，覆盖国家全名映射、importance 枚举、RFC3339 解析、字符串字段构造、null 兜底与方法签名）。
+
+### Reference
+
+初始宏观接口对应提交：[longbridge/openapi#540](https://github.com/longbridge/openapi/pull/540)（2026-06-11）；后续同步 macrodata v2 端点、关键字模糊过滤、字符串字段和默认倒序返回。
+
 ## v0.8.3 (2026-06-04)
 
 ### Changes — 跟进上游 LongBridge OpenAPI v4.3.0

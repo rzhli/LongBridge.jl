@@ -25,6 +25,9 @@ include("test_v0_8_0_sync.jl")
 # v0.8.1 上游同步（Screener v4.2.1 / OperatingFinancial.symbol / rank_list ib_ prefix）
 include("test_v0_8_1_sync.jl")
 
+# v0.8.5 上游同步（macroeconomic_indicators / macroeconomic + macrodata v2）
+include("test_v0_8_5_sync.jl")
+
 @testset "Config defaults" begin
     direct_cfg = Settings("k", "s", "t", DateTime(2099, 1, 1))
     @test direct_cfg.http_url == LongBridge.Constant.DEFAULT_HTTP_URL_CN
