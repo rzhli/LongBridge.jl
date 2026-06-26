@@ -306,7 +306,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `invest_relation(ctx, symbol)`, `operating(ctx, symbol)`, `buyback(ctx, symbol)`, `ratings(ctx, symbol)`
 
 ### Market Data (`MarketContext`, new in v0.6.0)
-- `market_status(ctx)`: Market open/close status across regions
+- `market_status(ctx)`: Market open/close status across regions; status fields use `MarketTradeStatus`
 - `broker_holding(ctx, symbol, period)` / `broker_holding_detail(ctx, symbol)` / `broker_holding_daily(ctx, symbol, broker_id)`
 - `ah_premium(ctx, symbol, period, count)` / `ah_premium_intraday(ctx, symbol)`: A/H premium klines & intraday
 - `trade_stats(ctx, symbol)`: Buy/sell/neutral trade statistics

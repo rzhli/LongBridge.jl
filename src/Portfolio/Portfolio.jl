@@ -88,20 +88,20 @@ function profit_analysis(
     isnothing(start_ts) || (sublist_params["start"] = start_ts)
     isnothing(end_ts) || (sublist_params["end"] = end_ts)
 
-    summary_t = Threads.@spawn ApiResponse(
+    summary_t = errormonitor(@async ApiResponse(
         Client.http_get(
             ctx.config,
             "/v1/portfolio/profit-analysis-summary";
-            params = summary_params,
+            params = copy(summary_params),
         ),
-    )
-    sublist_t = Threads.@spawn ApiResponse(
+    ))
+    sublist_t = errormonitor(@async ApiResponse(
         Client.http_get(
             ctx.config,
             "/v1/portfolio/profit-analysis-sublist";
-            params = sublist_params,
+            params = copy(sublist_params),
         ),
-    )
+    ))
     summary, sublist = fetch(summary_t), fetch(sublist_t)
     _check_or_raise(summary)
     _check_or_raise(sublist)

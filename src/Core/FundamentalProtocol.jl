@@ -2068,7 +2068,7 @@ function StructTypes.construct(::Type{MacroeconomicIndicator}, obj::JSON3.Object
         _macro_text_field(obj, (:country, :country_name, :region, :market)),
         _macro_text_field(obj, (:name, :indicator_name, :title, :display_name, :name_cn, :name_zh_cn, :name_en)),
         _macro_text_field(obj, (:adjustment_factor, :adjustment, :seasonal_adjustment)),
-        _macro_text_field(obj, (:periodicity, :frequency, :period, :interval)),
+        _macro_text_field(obj, (:periodicity, :frequence, :frequency, :period, :interval)),
         _macro_text_field(obj, (:category, :type, :indicator_type)),
         _macro_text_field(obj, (:describe, :description, :desc)),
         _int_or_zero(get(obj, :importance, 0)),
@@ -2089,8 +2089,11 @@ StructTypes.StructType(::Type{MacroeconomicIndicatorListResponse}) =
 function _looks_like_macro_indicator(obj::JSON3.Object)::Bool
     haskey(obj, :indicator_code) ||
         haskey(obj, :id) ||
+        haskey(obj, :indicator_id) ||
+        haskey(obj, :indicator_name) ||
         haskey(obj, :source_org) ||
         haskey(obj, :periodicity) ||
+        haskey(obj, :frequence) ||
         haskey(obj, :importance)
 end
 
@@ -2166,15 +2169,30 @@ end
 StructTypes.StructType(::Type{Macroeconomic}) = StructTypes.CustomStruct()
 function StructTypes.construct(::Type{Macroeconomic}, obj::JSON3.Object)
     Macroeconomic(
-        String(get(obj, :period, "")),
-        _rfc3339_opt(get(obj, :release_at, nothing)),
-        String(get(obj, :actual_value, "")),
-        String(get(obj, :previous_value, "")),
-        String(get(obj, :forecast_value, "")),
-        String(get(obj, :revised_value, "")),
+        _macro_text_field(obj, (:period, :observation_date)),
+        _rfc3339_opt(get(obj, :release_at, get(obj, :published_time, nothing))),
+        _macro_text(get(obj, :actual_value, get(obj, :actual_data, nothing))),
+        _macro_text(get(obj, :previous_value, get(obj, :previous_data, nothing))),
+        _macro_text(get(obj, :forecast_value, get(obj, :estimated_data, nothing))),
+        _macro_text(get(obj, :revised_value, nothing)),
         _rfc3339_opt(get(obj, :next_release_at, nothing)),
         _macro_text(get(obj, :unit, nothing)),
         _macro_text(get(obj, :unit_prefix, nothing)),
+    )
+end
+
+function _macro_with_default_unit(item::Macroeconomic, unit::String)::Macroeconomic
+    isempty(item.unit) && !isempty(unit) || return item
+    Macroeconomic(
+        item.period,
+        item.release_at,
+        item.actual_value,
+        item.previous_value,
+        item.forecast_value,
+        item.revised_value,
+        item.next_release_at,
+        unit,
+        item.unit_prefix,
     )
 end
 
@@ -2189,6 +2207,19 @@ struct MacroeconomicResponse
 end
 StructTypes.StructType(::Type{MacroeconomicResponse}) = StructTypes.CustomStruct()
 function StructTypes.construct(::Type{MacroeconomicResponse}, obj::JSON3.Object)
+    indicator_raw = get(obj, :indicator, nothing)
+    if indicator_raw isa JSON3.Object
+        info = StructTypes.construct(MacroeconomicIndicator, indicator_raw)
+        unit = _macro_text(get(indicator_raw, :unit, nothing))
+        data_raw = get(indicator_raw, :indicator_data, nothing)
+        items = if isnothing(data_raw)
+            Macroeconomic[]
+        else
+            [_macro_with_default_unit(StructTypes.construct(Macroeconomic, x), unit) for x in data_raw]
+        end
+        return MacroeconomicResponse(info, items, _macro_response_count(obj, length(items)))
+    end
+
     info_raw = get(obj, :info, nothing)
     info =
         info_raw isa JSON3.Object ?

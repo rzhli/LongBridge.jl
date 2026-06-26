@@ -189,6 +189,7 @@ struct QuoteContext
 end
 
 const REQUEST_WAIT_TIMEOUT = Client.REQUEST_TIMEOUT + 5.0
+const PUSH_CHANNEL_CAPACITY = 1024
 
 function _is_reconnectable_ws_error(e)
     msg = sprint(showerror, e)
@@ -525,7 +526,7 @@ connection and the background tasks.
 """
 function QuoteContext(config::Config.Settings)
     command_ch = Channel{AbstractCommand}(32)
-    push_ch = Channel{Tuple{UInt8,Vector{UInt8}}}(Inf)     # raw push events from WS
+    push_ch = Channel{Tuple{UInt8,Vector{UInt8}}}(PUSH_CHANNEL_CAPACITY)
 
     inner = InnerQuoteContext(
         config,
@@ -549,8 +550,8 @@ function QuoteContext(config::Config.Settings)
     ctx = QuoteContext(inner)
 
     # Start background tasks
-    inner.background_task = @async run_quote_loop(inner, push_ch)
-    inner.push_dispatcher_task = @async dispatch_push_events(ctx, push_ch)
+    inner.background_task = errormonitor(@async run_quote_loop(inner, push_ch))
+    inner.push_dispatcher_task = errormonitor(@async dispatch_push_events(ctx, push_ch))
 
     return ctx
 end

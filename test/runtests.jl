@@ -28,6 +28,9 @@ include("test_v0_8_1_sync.jl")
 # v0.8.5 上游同步（macroeconomic_indicators / macroeconomic + macrodata v2）
 include("test_v0_8_5_sync.jl")
 
+# v0.8.6 上游同步（market TradeStatus + macrodata detail fields）
+include("test_v0_8_6_sync.jl")
+
 @testset "Config defaults" begin
     direct_cfg = Settings("k", "s", "t", DateTime(2099, 1, 1))
     @test direct_cfg.http_url == LongBridge.Constant.DEFAULT_HTTP_URL_CN
@@ -63,6 +66,24 @@ end
     empty_df = to_dataframe(_ToDataFrameItem[])
     @test eltype(empty_df.name) != Any
     @test eltype(empty_df.count) != Any
+end
+
+@testset "HTTP query builder" begin
+    @test LongBridge.Client._build_query_string(Dict{String,Any}()) == ""
+    query = LongBridge.Client._build_query_string(
+        Dict{String,Any}(
+            "symbol" => ["AAPL.US", "700.HK"],
+            "count" => 20,
+            "skip" => nothing,
+            "space" => "a b",
+        ),
+    )
+    parts = Set(split(query, "&"))
+    @test "symbol=AAPL.US" in parts
+    @test "symbol=700.HK" in parts
+    @test "count=20" in parts
+    @test "space=a%20b" in parts
+    @test !("skip=nothing" in parts)
 end
 
 @testset "Disconnect" begin

@@ -161,7 +161,9 @@ end
          "delay_trade_status":108,"delay_timestamp":"1747257600","sub_status":0,"delay_sub_status":0}]}"""))
     @test length(ms.market_time) == 1
     @test ms.market_time[1].market === Market.HK
-    @test ms.market_time[1].trade_status == 102
+    @test ms.market_time[1].trade_status === MarketTradeStatus.OPEN_BID
+    @test ms.market_time[1].delay_trade_status === MarketTradeStatus.CLOSING
+    @test LongBridge.MarketProtocol._market_trade_status_code(ms.market_time[1].trade_status) == 102
 
     # BrokerHoldingTop（含 chg 为空）
     top = StructTypes.construct(BrokerHoldingTop, JSON3.read("""

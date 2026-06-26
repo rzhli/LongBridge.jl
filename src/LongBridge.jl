@@ -239,7 +239,7 @@ export MarketContext,
     top_movers,
     rank_categories,
     rank_list
-export BrokerHoldingPeriod, AhPremiumPeriod
+export BrokerHoldingPeriod, AhPremiumPeriod, MarketTradeStatus
 export MarketTimeItem,
     MarketStatusResponse,
     BrokerHoldingEntry,

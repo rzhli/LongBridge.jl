@@ -7,6 +7,7 @@ import ..Utils: _parse_optional_decimal
 
 export BrokerHoldingPeriod,
     AhPremiumPeriod,
+    MarketTradeStatus,
     MarketTimeItem,
     MarketStatusResponse,
     BrokerHoldingEntry,
@@ -34,7 +35,23 @@ export BrokerHoldingPeriod,
     RankListResponse,
     _broker_holding_period_str,
     _ah_premium_period_line_type,
-    _market_from_str
+    _market_from_str,
+    _market_trade_status_from_int,
+    _market_trade_status_code,
+    _market_trade_status_name,
+    _market_trade_status_label,
+    _market_trade_status_normalize,
+    _market_trade_status_is_us_market,
+    _market_trade_status_is_us_pre_post,
+    _market_trade_status_is_us_night,
+    _market_trade_status_is_us_closing,
+    _market_trade_status_is_closing,
+    _market_trade_status_is_us_prev,
+    _market_trade_status_is_us_after,
+    _market_trade_status_is_trading,
+    _market_trade_status_is_dark,
+    _market_trade_status_allow_trading,
+    _market_trade_status_is_special
 
 @enumx BrokerHoldingPeriod begin
     Rct1 = 1   # 1 日变化
@@ -83,11 +100,203 @@ const RawJSON = Union{JSON3.Object,JSON3.Array,Dict{String,Any},Vector{Any},Noth
 
 # ── market_status ──────────────────────────────────────────────────
 
+@enumx TradeStatus begin
+    UNKNOWN = -1
+    NO_REGISTER_QUOTE = 0
+    CLEAN = 101
+    OPEN_BID = 102
+    MORNING_CLOSING = 103
+    TRADING = 105
+    NOON_CLOSING = 106
+    CLOSE_BID = 107
+    CLOSING = 108
+    DARK_WAIT = 110
+    DARK_TRADING = 111
+    DARK_CLOSING = 112
+    AFTER_FIX = 120
+    HALF_CLOSING = 121
+    NOT_OPENED = 122
+    REALTIME_QUOTE = 123
+    US_PREV = 201
+    US_TRADING = 202
+    US_AFTER = 203
+    US_CLOSING = 204
+    US_STOP = 205
+    US_CLEAN = 206
+    US_NIGHT = 207
+    US_PREV_MARKET_CLEAN = 209
+    US_AFTER_MARKET_CLEAN = 210
+    REFRESH = 1000
+    DELIST = 1001
+    PREPARE = 1002
+    CODE_CHANGE = 1003
+    STOP = 1004
+    WILL_OPEN = 1005
+    COMMON_SUSPEND = 1006
+    EXPIRE = 1007
+    NO_QUOTE = 1008
+    UNITED = 1009
+    TRADING_HALT = 1010
+    WAIT_LISTING = 1011
+    FUSE = 2001
+end
+
+const MarketTradeStatus = TradeStatus
+
+function _market_trade_status_from_int(n::Integer)::TradeStatus.T
+    n == -1 ? TradeStatus.UNKNOWN :
+    n == 0 ? TradeStatus.NO_REGISTER_QUOTE :
+    n == 101 ? TradeStatus.CLEAN :
+    n == 102 ? TradeStatus.OPEN_BID :
+    n == 103 ? TradeStatus.MORNING_CLOSING :
+    n == 105 ? TradeStatus.TRADING :
+    n == 106 ? TradeStatus.NOON_CLOSING :
+    n == 107 ? TradeStatus.CLOSE_BID :
+    n == 108 ? TradeStatus.CLOSING :
+    n == 110 ? TradeStatus.DARK_WAIT :
+    n == 111 ? TradeStatus.DARK_TRADING :
+    n == 112 ? TradeStatus.DARK_CLOSING :
+    n == 120 ? TradeStatus.AFTER_FIX :
+    n == 121 ? TradeStatus.HALF_CLOSING :
+    n == 122 ? TradeStatus.NOT_OPENED :
+    n == 123 ? TradeStatus.REALTIME_QUOTE :
+    n == 201 ? TradeStatus.US_PREV :
+    n == 202 ? TradeStatus.US_TRADING :
+    n == 203 ? TradeStatus.US_AFTER :
+    n == 204 ? TradeStatus.US_CLOSING :
+    n == 205 ? TradeStatus.US_STOP :
+    n == 206 ? TradeStatus.US_CLEAN :
+    n == 207 ? TradeStatus.US_NIGHT :
+    n == 209 ? TradeStatus.US_PREV_MARKET_CLEAN :
+    n == 210 ? TradeStatus.US_AFTER_MARKET_CLEAN :
+    n == 1000 ? TradeStatus.REFRESH :
+    n == 1001 ? TradeStatus.DELIST :
+    n == 1002 ? TradeStatus.PREPARE :
+    n == 1003 ? TradeStatus.CODE_CHANGE :
+    n == 1004 ? TradeStatus.STOP :
+    n == 1005 ? TradeStatus.WILL_OPEN :
+    n == 1006 ? TradeStatus.COMMON_SUSPEND :
+    n == 1007 ? TradeStatus.EXPIRE :
+    n == 1008 ? TradeStatus.NO_QUOTE :
+    n == 1009 ? TradeStatus.UNITED :
+    n == 1010 ? TradeStatus.TRADING_HALT :
+    n == 1011 ? TradeStatus.WAIT_LISTING :
+    n == 2001 ? TradeStatus.FUSE : TradeStatus.UNKNOWN
+end
+
+_market_trade_status_from_value(v::TradeStatus.T) = v
+function _market_trade_status_from_value(v)::TradeStatus.T
+    isnothing(v) && return TradeStatus.UNKNOWN
+    if v isa AbstractString
+        n = tryparse(Int, String(v))
+        isnothing(n) && return TradeStatus.UNKNOWN
+        return _market_trade_status_from_int(n)
+    end
+    v isa Number && return _market_trade_status_from_int(Int(v))
+    TradeStatus.UNKNOWN
+end
+
+_market_trade_status_code(status::TradeStatus.T)::Int = Int(status)
+
+function _market_trade_status_normalize(status::TradeStatus.T)::TradeStatus.T
+    status === TradeStatus.CLEAN ? TradeStatus.CLOSING :
+    status === TradeStatus.US_PREV_MARKET_CLEAN ? TradeStatus.US_CLOSING :
+    status === TradeStatus.US_CLEAN ? TradeStatus.US_PREV :
+    status === TradeStatus.US_AFTER_MARKET_CLEAN ? TradeStatus.US_TRADING : status
+end
+
+function _market_trade_status_name(status::TradeStatus.T)::String
+    normalized = _market_trade_status_normalize(status)
+    normalized === TradeStatus.UNKNOWN || normalized === TradeStatus.NO_REGISTER_QUOTE ? "Unknown" :
+    normalized === TradeStatus.OPEN_BID ? "Open Bid" :
+    normalized === TradeStatus.MORNING_CLOSING ? "Morning Break" :
+    normalized === TradeStatus.TRADING || normalized === TradeStatus.US_TRADING ? "Trading" :
+    normalized === TradeStatus.NOON_CLOSING ? "Mid-Day Break" :
+    normalized === TradeStatus.CLOSE_BID ? "Close Bid" :
+    normalized === TradeStatus.CLOSING ||
+        normalized === TradeStatus.HALF_CLOSING ||
+        normalized === TradeStatus.US_CLOSING ? "Closed" :
+    normalized === TradeStatus.DARK_WAIT ? "Dark Wait" :
+    normalized === TradeStatus.DARK_TRADING ? "Dark Trading" :
+    normalized === TradeStatus.DARK_CLOSING ? "Closing" :
+    normalized === TradeStatus.AFTER_FIX ? "After Fix" :
+    normalized === TradeStatus.NOT_OPENED ? "Not Open" :
+    normalized === TradeStatus.REALTIME_QUOTE ? "Temporary Break" :
+    normalized === TradeStatus.US_PREV ? "Pre-Market" :
+    normalized === TradeStatus.US_AFTER ? "Post-Market" :
+    normalized === TradeStatus.US_STOP || normalized === TradeStatus.STOP ? "Stop" :
+    normalized === TradeStatus.US_NIGHT ? "Overnight" :
+    normalized === TradeStatus.REFRESH ? "Refresh" :
+    normalized === TradeStatus.DELIST ? "Delist" :
+    normalized === TradeStatus.PREPARE ? "Prepare" :
+    normalized === TradeStatus.CODE_CHANGE ? "Code Change" :
+    normalized === TradeStatus.WILL_OPEN ? "Will Open" :
+    normalized === TradeStatus.COMMON_SUSPEND ? "Common Suspend" :
+    normalized === TradeStatus.EXPIRE ? "Expire" :
+    normalized === TradeStatus.NO_QUOTE ? "No Quote" :
+    normalized === TradeStatus.UNITED ? "Not Listed" :
+    normalized === TradeStatus.TRADING_HALT ? "Terminated" :
+    normalized === TradeStatus.WAIT_LISTING ? "Wait Listing" :
+    normalized === TradeStatus.FUSE ? "Fuse" : "Unknown"
+end
+
+function _market_trade_status_label(status::TradeStatus.T)::String
+    normalized = _market_trade_status_normalize(status)
+    if normalized === TradeStatus.US_PREV ||
+        normalized === TradeStatus.US_TRADING ||
+        normalized === TradeStatus.US_AFTER ||
+        normalized === TradeStatus.US_NIGHT ||
+        normalized === TradeStatus.US_CLOSING ||
+        normalized === TradeStatus.TRADING ||
+        normalized === TradeStatus.CLOSING
+        return _market_trade_status_name(normalized)
+    end
+    ""
+end
+
+_market_trade_status_is_us_market(status::TradeStatus.T)::Bool =
+    200 <= _market_trade_status_code(status) < 300
+_market_trade_status_is_us_prev(status::TradeStatus.T)::Bool =
+    status === TradeStatus.US_PREV || status === TradeStatus.US_CLEAN
+_market_trade_status_is_us_after(status::TradeStatus.T)::Bool =
+    status === TradeStatus.US_AFTER
+_market_trade_status_is_us_pre_post(status::TradeStatus.T)::Bool =
+    _market_trade_status_is_us_prev(status) || _market_trade_status_is_us_after(status)
+_market_trade_status_is_us_night(status::TradeStatus.T)::Bool =
+    status === TradeStatus.US_NIGHT
+_market_trade_status_is_us_closing(status::TradeStatus.T)::Bool =
+    status === TradeStatus.US_CLOSING || status === TradeStatus.US_PREV_MARKET_CLEAN
+_market_trade_status_is_closing(status::TradeStatus.T)::Bool =
+    status === TradeStatus.US_CLOSING ||
+    status === TradeStatus.US_PREV_MARKET_CLEAN ||
+    status === TradeStatus.CLOSING ||
+    status === TradeStatus.HALF_CLOSING
+_market_trade_status_is_trading(status::TradeStatus.T)::Bool =
+    status === TradeStatus.TRADING ||
+    status === TradeStatus.US_TRADING ||
+    status === TradeStatus.US_AFTER_MARKET_CLEAN
+_market_trade_status_is_dark(status::TradeStatus.T)::Bool =
+    status === TradeStatus.DARK_WAIT ||
+    status === TradeStatus.DARK_TRADING ||
+    status === TradeStatus.DARK_CLOSING
+_market_trade_status_allow_trading(status::TradeStatus.T)::Bool =
+    status === TradeStatus.OPEN_BID ||
+    status === TradeStatus.TRADING ||
+    status === TradeStatus.CLOSE_BID ||
+    status === TradeStatus.NOT_OPENED ||
+    status === TradeStatus.NOON_CLOSING ||
+    status === TradeStatus.US_TRADING ||
+    status === TradeStatus.US_AFTER_MARKET_CLEAN
+_market_trade_status_is_special(status::TradeStatus.T)::Bool =
+    _market_trade_status_code(status) < 100 ||
+    status === TradeStatus.US_STOP ||
+    _market_trade_status_code(status) >= 1000
+
 struct MarketTimeItem
     market::Market.T
-    trade_status::Int
+    trade_status::TradeStatus.T
     timestamp::String
-    delay_trade_status::Int
+    delay_trade_status::TradeStatus.T
     delay_timestamp::String
     sub_status::Int
     delay_sub_status::Int
@@ -96,9 +305,9 @@ StructTypes.StructType(::Type{MarketTimeItem}) = StructTypes.CustomStruct()
 function StructTypes.construct(::Type{MarketTimeItem}, obj::JSON3.Object)
     MarketTimeItem(
         _market_from_str(String(get(obj, :market, ""))),
-        Int(get(obj, :trade_status, 0)),
+        _market_trade_status_from_value(get(obj, :trade_status, -1)),
         String(get(obj, :timestamp, "")),
-        Int(get(obj, :delay_trade_status, 0)),
+        _market_trade_status_from_value(get(obj, :delay_trade_status, -1)),
         String(get(obj, :delay_timestamp, "")),
         Int(get(obj, :sub_status, 0)),
         Int(get(obj, :delay_sub_status, 0)),

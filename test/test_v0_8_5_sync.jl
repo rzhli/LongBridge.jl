@@ -15,6 +15,13 @@ using JSON3, StructTypes, Dates
     @test _macroeconomic_country_str(MacroeconomicCountry.EuroZone)     == "Euro Zone"
     @test _macroeconomic_country_str(MacroeconomicCountry.Japan)        == "Japan"
     @test _macroeconomic_country_str(MacroeconomicCountry.Singapore)    == "Singapore"
+
+    @test LongBridge.Fundamental._macro_country_market(MacroeconomicCountry.HongKong) == "HK"
+    @test LongBridge.Fundamental._macro_country_market(MacroeconomicCountry.China) == "CN"
+    @test LongBridge.Fundamental._macro_country_market(MacroeconomicCountry.UnitedStates) == "US"
+    @test LongBridge.Fundamental._macro_country_market(MacroeconomicCountry.EuroZone) == "EU"
+    @test LongBridge.Fundamental._macro_country_market(MacroeconomicCountry.Japan) == "JP"
+    @test LongBridge.Fundamental._macro_country_market(MacroeconomicCountry.Singapore) == "SG"
 end
 
 @testset "MacroeconomicImportance from int" begin
@@ -83,16 +90,21 @@ end
     @test nested.data[1].name == "China CPI"
 
     actual_v2 = StructTypes.construct(MacroeconomicIndicatorListResponse, JSON3.read("""
-        {"indicator_list":[{"id":"CN_CPI_YOY","name":"China CPI YoY","importance":2}],"total":27}"""))
+        {"indicator_list":[{"indicator_id":42,"indicator_name":"China CPI YoY",
+                            "market":"CN","frequence":"month",
+                            "description":"Consumer prices","importance":2}],"total":27}"""))
     @test actual_v2.count == 27
     @test length(actual_v2.data) == 1
-    @test actual_v2.data[1].indicator_code == "CN_CPI_YOY"
+    @test actual_v2.data[1].indicator_code == "42"
     @test actual_v2.data[1].name == "China CPI YoY"
+    @test actual_v2.data[1].country == "CN"
+    @test actual_v2.data[1].periodicity == "month"
+    @test actual_v2.data[1].describe == "Consumer prices"
 
     aliased = StructTypes.construct(MacroeconomicIndicatorListResponse, JSON3.read("""
         {"indicator_list":[{"indicator_id":"CN_CPI","indicator_name":"China CPI",
                             "source":"NBS","country_name":"China (Mainland)",
-                            "frequency":"monthly","description":"Consumer prices",
+                            "frequence":"monthly","description":"Consumer prices",
                             "start_at":"1990-01-01T00:00:00Z","importance":2}],"total":1}"""))
     @test aliased.count == 1
     @test aliased.data[1].indicator_code == "CN_CPI"
@@ -131,6 +143,30 @@ end
     @test pt.revised_value == ""
     @test pt.unit == "%"
     @test pt.unit_prefix == ""
+
+    v2 = StructTypes.construct(MacroeconomicResponse, JSON3.read("""
+        {"indicator":{"indicator_id":8401,"indicator_name":"Nonfarm Payrolls",
+                      "unit":"Thousand","description":"US employment report",
+                      "market":"US","frequence":"monthly","importance":3,
+                      "indicator_data":[
+                        {"actual_data":"175","previous_data":"315","estimated_data":"243",
+                         "published_time":"2024-05-03T12:30:00",
+                         "observation_date":"2024-04"}
+                      ]},
+         "total":290}"""))
+    @test v2.count == 290
+    @test v2.info.indicator_code == "8401"
+    @test v2.info.name == "Nonfarm Payrolls"
+    @test v2.info.country == "US"
+    @test v2.info.periodicity == "monthly"
+    @test v2.info.importance == 3
+    @test v2.info.describe == "US employment report"
+    @test v2.data[1].period == "2024-04"
+    @test v2.data[1].release_at == DateTime(2024, 5, 3, 12, 30, 0)
+    @test v2.data[1].actual_value == "175"
+    @test v2.data[1].previous_value == "315"
+    @test v2.data[1].forecast_value == "243"
+    @test v2.data[1].unit == "Thousand"
 end
 
 @testset "MacroeconomicResponse info 为 null 兜底" begin
@@ -215,7 +251,7 @@ end
     @test misses[1].release_at == DateTime(2024, 5, 3, 12, 30, 0)
     @test misses[1].unit == "Thousand"
 
-    # 日期参数会被转成 start_time/end_time（与上游 Rust 一致）
-    @test LongBridge.Fundamental._date_str(Date(2023, 1, 1)) * "T00:00:00Z" == "2023-01-01T00:00:00Z"
-    @test LongBridge.Fundamental._date_str("2024-12-31")     * "T23:59:59Z" == "2024-12-31T23:59:59Z"
+    # 日期参数会以 v2 API 的 start_date/end_date 形式发送。
+    @test LongBridge.Fundamental._date_str(Date(2023, 1, 1)) == "2023-01-01"
+    @test LongBridge.Fundamental._date_str("2024-12-31") == "2024-12-31"
 end

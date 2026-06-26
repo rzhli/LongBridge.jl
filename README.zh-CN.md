@@ -313,7 +313,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 
 ### 市场数据（MarketContext，v0.6.0 新增）
 - `MarketContext(config)`: 创建上下文
-- `market_status(ctx)`: 各市场开/收市状态
+- `market_status(ctx)`: 各市场开/收市状态；状态字段使用 `MarketTradeStatus`
 - `broker_holding(ctx, symbol, period)`: 净买/净卖前十券商
 - `broker_holding_detail(ctx, symbol)`: 全部券商持仓明细
 - `broker_holding_daily(ctx, symbol, broker_id)`: 指定券商日度持仓

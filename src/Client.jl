@@ -28,6 +28,7 @@ const HTTP_CLIENT = HTTP.Client(
 )
 # WebSocket Client Constants (参考 Rust 实现)
 const REQUEST_TIMEOUT = 30.0  # seconds
+const QUERY_STRING_SIZE_HINT = 256
 
 # 认证和心跳命令 (use ControlProtocol enum values)
 const COMMAND_CODE_AUTH = UInt8(ControlProtocol.ControlCommand.CMD_AUTH)
@@ -107,17 +108,25 @@ end
 # 构建 query string
 function _build_query_string(params::Dict{String,Any})
     isempty(params) && return ""
-    parts = String[]
+    io = IOBuffer(sizehint = QUERY_STRING_SIZE_HINT)
+    first = true
     for (k, v) in params
-        if v isa Vector
+        isnothing(v) && continue
+        escaped_key = HTTP.URIs.escapeuri(k)
+        if v isa AbstractVector
             for val in v
-                push!(parts, "$(k)=$(HTTP.URIs.escapeuri(val))")
+                isnothing(val) && continue
+                first || write(io, UInt8('&'))
+                first = false
+                print(io, escaped_key, "=", HTTP.URIs.escapeuri(string(val)))
             end
         else
-            push!(parts, "$(k)=$(HTTP.URIs.escapeuri(string(v)))")
+            first || write(io, UInt8('&'))
+            first = false
+            print(io, escaped_key, "=", HTTP.URIs.escapeuri(string(v)))
         end
     end
-    join(parts, "&")
+    first ? "" : String(take!(io))
 end
 
 # 通用 HTTP 请求函数
@@ -323,7 +332,7 @@ function connect!(client::WSClient)
     connect_error = Ref{Any}(nothing)
 
     # 创建WebSocket连接
-    ws_task = @async begin
+    ws_task = errormonitor(@async begin
         try
             WebSockets.open(
                 full_url;
@@ -349,20 +358,18 @@ function connect!(client::WSClient)
             client.connected = false
             notify(client.auth_event)
         end
-    end
+    end)
 
     # 等待认证完成（最多 30s）。
     # 在认证响应到达消息循环时，notify(auth_event) 会立即唤醒此处。
     timer = Timer(30.0)
-    waiter = @async (
+    errormonitor(@async begin
         try
-            ;
-            wait(timer);
-            notify(client.auth_event);
+            wait(timer)
+            notify(client.auth_event)
         catch
-            ;
         end
-    )
+    end)
     try
         wait(client.auth_event)
     finally
@@ -472,7 +479,7 @@ function start_heartbeat_loop(client::WSClient)
     ws = client.ws
     isnothing(ws) && return
 
-    client.heartbeat_task = @async begin
+    client.heartbeat_task = errormonitor(@async begin
         try
             @info "启动心跳循环"
             while client.connected && client.ws === ws && _ws_is_open(ws)
@@ -498,7 +505,7 @@ function start_heartbeat_loop(client::WSClient)
         finally
             @info "心跳循环已停止" session_id=client.session_id
         end
-    end
+    end)
 end
 
 
@@ -511,7 +518,7 @@ function start_message_loop(client::WSClient)
     ws = client.ws
     isnothing(ws) && return
 
-    @async begin
+    errormonitor(@async begin
         try
             @info "启动消息处理循环"
             # 使用HTTP.jl推荐的WebSocket消息循环模式
@@ -672,7 +679,7 @@ function start_message_loop(client::WSClient)
         finally
             @info "消息处理循环已停止" session_id=client.session_id
         end
-    end
+    end)
 end
 
 """
@@ -698,7 +705,7 @@ function reconnect!(client::WSClient)
     reconnect_error = Ref{Any}(nothing)
     reconnect_ok = Ref(false)
 
-    @async begin
+    errormonitor(@async begin
         try
             full_url = _websocket_url(client.url)
 
@@ -761,7 +768,7 @@ function reconnect!(client::WSClient)
             client.connected = false
             notify(reconnect_event)
         end
-    end
+    end)
 
     timer = Timer(REQUEST_TIMEOUT) do _
         notify(reconnect_event)
@@ -792,7 +799,7 @@ function full_reconnect!(client::WSClient)
         return
     end
 
-    client.reconnect_task = @async begin
+    client.reconnect_task = errormonitor(@async begin
         disconnect!(client)
 
         max_attempts = 5
@@ -825,7 +832,7 @@ function full_reconnect!(client::WSClient)
 
         @error "完全重连 $max_attempts 次后仍然失败，放弃重连"
         client.reconnect_attempts = 0
-    end
+    end)
 end
 
 # ==================== WebSocket Authentication ====================

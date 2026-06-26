@@ -91,13 +91,21 @@ end
 端点：`GET /v1/quote/institution-rating-latest` + `GET /v1/quote/institution-ratings`
 """
 function institution_rating(ctx::FundamentalContext, symbol::AbstractString)
-    params = Dict{String,Any}("counter_id" => symbol_to_counter_id(symbol))
-    latest_t = Threads.@spawn ApiResponse(
-        Client.http_get(ctx.config, "/v1/quote/institution-rating-latest"; params = params),
-    )
-    summary_t = Threads.@spawn ApiResponse(
-        Client.http_get(ctx.config, "/v1/quote/institution-ratings"; params = params),
-    )
+    counter_id = symbol_to_counter_id(symbol)
+    latest_t = errormonitor(@async ApiResponse(
+        Client.http_get(
+            ctx.config,
+            "/v1/quote/institution-rating-latest";
+            params = Dict{String,Any}("counter_id" => counter_id),
+        ),
+    ))
+    summary_t = errormonitor(@async ApiResponse(
+        Client.http_get(
+            ctx.config,
+            "/v1/quote/institution-ratings";
+            params = Dict{String,Any}("counter_id" => counter_id),
+        ),
+    ))
     latest, summary = fetch(latest_t), fetch(summary_t)
     _check(latest)
     _check(summary)
@@ -659,7 +667,7 @@ end
     macroeconomic_indicators(ctx; country=nothing, keyword=nothing, offset=nothing, limit=nothing) -> MacroeconomicIndicatorListResponse
 
 宏观经济指标列表。`country` 为可选的国家/地区过滤（`MacroeconomicCountry.T` 枚举，
-内部转为 API 要求的全名，如 `UnitedStates` → `"United States"`），`keyword` 为可选的
+内部转为 v2 API 要求的市场代码，如 `UnitedStates` → `"US"`），`keyword` 为可选的
 关键字模糊过滤。
 `offset` 默认 0，`limit` 默认 100（最大 1000）。响应 `count` 为符合条件的指标总数。
 
@@ -673,9 +681,9 @@ function macroeconomic_indicators(
     offset::Union{Integer,Nothing} = nothing,
     limit::Union{Integer,Nothing} = nothing,
 )
-    params = Dict{String,Any}()
-    isnothing(country) ||
-        (params["country"] = FundamentalProtocol._macroeconomic_country_str(country))
+    params = Dict{String,Any}(
+        "market" => isnothing(country) ? "ALL" : _macro_country_market(country),
+    )
     filter_keyword = isnothing(keyword) ? name : keyword
     isnothing(filter_keyword) || (params["keyword"] = String(filter_keyword))
     isnothing(offset) || (params["offset"] = Int(offset))
@@ -692,7 +700,7 @@ end
 
 指定宏观经济指标的历史数据。`id` 通常来自 `macroeconomic_indicators` 返回的
 `indicator_code` 字段。`start_date`/`end_date` 接受 `"YYYY-MM-DD"` 字符串或 `Date`，
-内部分别转为 `YYYY-MM-DDT00:00:00Z` / `YYYY-MM-DDT23:59:59Z` 的 `start_time`/`end_time`。
+内部按 v2 API 要求发送为 `start_date` / `end_date`。
 `sort` 默认为 `"desc"`，即按最新数据在前返回。响应 `count` 为历史数据点总数。
 
 端点：`GET /v2/quote/macrodata/{id}`
@@ -707,8 +715,8 @@ function macroeconomic(
     sort::Union{AbstractString,Nothing} = "desc",
 )
     params = Dict{String,Any}()
-    isnothing(start_date) || (params["start_time"] = _date_str(start_date) * "T00:00:00Z")
-    isnothing(end_date) || (params["end_time"] = _date_str(end_date) * "T23:59:59Z")
+    isnothing(start_date) || (params["start_date"] = _date_str(start_date))
+    isnothing(end_date) || (params["end_date"] = _date_str(end_date))
     isnothing(offset) || (params["offset"] = Int(offset))
     isnothing(limit) || (params["limit"] = Int(limit))
     isnothing(sort) || (params["sort"] = String(sort))
@@ -719,5 +727,15 @@ end
 
 _date_str(d::Dates.Date) = Dates.format(d, Dates.dateformat"yyyy-mm-dd")
 _date_str(s::AbstractString) = String(s)
+
+function _macro_country_market(c::MacroeconomicCountry.T)
+    c === MacroeconomicCountry.HongKong ? "HK" :
+    c === MacroeconomicCountry.China ? "CN" :
+    c === MacroeconomicCountry.UnitedStates ? "US" :
+    c === MacroeconomicCountry.EuroZone ? "EU" :
+    c === MacroeconomicCountry.Japan ? "JP" :
+    c === MacroeconomicCountry.Singapore ? "SG" :
+    error("unknown MacroeconomicCountry: $c")
+end
 
 end # module Fundamental

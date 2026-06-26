@@ -246,7 +246,7 @@ function TradeContext(config::Config.Settings)
         InnerTradeContext(config, nothing, command_ch, nothing, Callbacks(), Set{String}())
     ctx = TradeContext(inner)
 
-    inner.background_task = @async run_trade_loop(inner)
+    inner.background_task = errormonitor(@async run_trade_loop(inner))
 
     return ctx
 end
