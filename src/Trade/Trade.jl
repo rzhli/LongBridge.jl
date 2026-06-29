@@ -495,7 +495,7 @@ function cash_flow(
     cmd = HttpGetCmd("/v1/asset/cashflow", to_dict(options), Channel(1))
     resp = request(ctx, cmd)
     if resp.code == 0
-        return JSON3.read(JSON3.write(resp.data.list), Vector{CashFlow})
+        return [StructTypes.construct(CashFlow, item) for item in resp.data.list]
     else
         @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
     end

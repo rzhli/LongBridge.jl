@@ -112,6 +112,9 @@ function safeparse(::Type{T}, val) where {T}
 
     # 枚举类型（EnumX）直接用构造器解析
     if T <: EnumX.Enum
+        if val isa Integer
+            return T(val)
+        end
         sval = String(val)
         for e in instances(T)  # 枚举所有成员
             ename = string(e)
@@ -125,6 +128,9 @@ function safeparse(::Type{T}, val) where {T}
 
     # 数字类型
     if T <: Real
+        if val isa Real
+            return T(val)
+        end
         return parse(T, val)
     end
 

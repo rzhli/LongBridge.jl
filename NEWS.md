@@ -1,5 +1,12 @@
 # Release Notes
 
+## v0.8.7 (2026-06-29)
+
+- 修复 `account_balance(ctx)` 解析：`cash_infos` 与 `frozen_transaction_fees` 现在会显式构造成 `CashInfo` / `FrozenTransactionFee`，避免 `JSON3.Object` 无法转换为嵌套结构体；`market` 字段同步解析为 `Market.T`。
+- 修复 `cash_flow(ctx; ...)` 解析：支持上游返回数字枚举码（如 `direction: 1`、`business_type: 0`）、数字金额和 Unix timestamp 字段；`cash_flow` 改为从 `resp.data.list` 直接构造 `CashFlow`。
+- `safeparse` 支持已是 numeric 的 enum / real API 值，减少 JSON 数字字段和字符串字段混用时的解析失败。
+- 优化交易资产相关 REPL 显示：`Vector{CashFlow}`、`FundPositionsResponse`、`StockPositionsResponse` 现在输出简洁摘要，避免默认结构体全限定名噪音。
+
 ## v0.8.6 (2026-06-26)
 
 - 同步上游 LongBridge OpenAPI v4.3.3：新增 `MarketProtocol.TradeStatus` / 顶层别名 `MarketTradeStatus`，`MarketTimeItem.trade_status` 与 `delay_trade_status` 改为 typed enum，并补齐 market 状态码表、显示名、label、归一化与判断 helper（含 `2001`、`123`/`1009`/`1010` 名称修正）。

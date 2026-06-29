@@ -1,5 +1,9 @@
 using Test
 using LongBridge
+using LongBridge.TradeProtocol: AccountBalance, BalanceType, CashFlow, CashFlowDirection,
+                               CashInfo, FrozenTransactionFee, FundPositionChannel,
+                               FundPositionsResponse, RiskLevel, StockPositionChannel,
+                               StockPositionsResponse
 using LongBridge.Utils: Dec64, symbol_to_counter_id, index_symbol_to_counter_id,
                        counter_id_to_symbol, lookup_counter_id, is_etf,
                        _parse_optional_decimal, safeparse
@@ -57,6 +61,8 @@ end
 @testset "Decimal parsing" begin
     @test safeparse(Dec64, "")     == Dec64(0)
     @test safeparse(Dec64, "1.23") == Dec64("1.23")
+    @test safeparse(Float64, 1) == 1.0
+    @test safeparse(BalanceType.T, 1) === BalanceType.Cash
     @test isnothing(_parse_optional_decimal(nothing))
     @test isnothing(_parse_optional_decimal(""))
     @test _parse_optional_decimal("3.14")  == Dec64("3.14")
@@ -64,6 +70,63 @@ end
     # API 偶尔返回 "--" 等占位符表示无数据
     @test isnothing(_parse_optional_decimal("--"))
     @test isnothing(_parse_optional_decimal("N/A"))
+end
+
+# =========================================================================
+# Trade
+# =========================================================================
+
+@testset "Trade account balance parsing" begin
+    raw = """
+    {"total_cash":"1000.5","max_finance_amount":"5000","remaining_finance_amount":"4500",
+     "risk_level":"Moderate","margin_call":"0","currency":"USD",
+     "cash_infos":[{"withdraw_cash":"800","available_cash":"900.25","frozen_cash":"50",
+                    "settling_cash":"150","currency":"USD"}],
+     "net_assets":"1200.75","init_margin":"100","maintenance_margin":"80","buy_power":"3000",
+     "frozen_transaction_fees":[{"currency":"HKD","frozen_transaction_fee":"12.34"}],
+     "market":"US"}"""
+    balance = StructTypes.construct(AccountBalance, JSON3.read(raw))
+
+    @test balance.currency === Currency.USD
+    @test balance.risk_level === RiskLevel.Moderate
+    @test balance.market === Market.US
+    @test balance.total_cash == 1000.5
+    @test length(balance.cash_infos) == 1
+    @test balance.cash_infos[1] isa CashInfo
+    @test balance.cash_infos[1].available_cash == 900.25
+    @test length(balance.frozen_transaction_fees) == 1
+    @test balance.frozen_transaction_fees[1] isa FrozenTransactionFee
+    @test balance.frozen_transaction_fees[1].frozen_transaction_fee == 12.34
+end
+
+@testset "Trade cash flow parsing" begin
+    raw = """
+    {"transaction_flow_name":"存入资金","direction":1,"business_type":0,
+     "balance":1000.5,"currency":"USD","business_time":"1746748800",
+     "symbol":null,"description":"deposit"}"""
+    flow = StructTypes.construct(CashFlow, JSON3.read(raw))
+
+    @test flow.transaction_flow_name == "存入资金"
+    @test flow.direction === CashFlowDirection.Out
+    @test flow.business_type === BalanceType.UnknownBalance
+    @test flow.balance == 1000.5
+    @test flow.business_time == unix2datetime(1746748800)
+    @test isnothing(flow.symbol)
+    @test flow.description == "deposit"
+
+    business_time = string(unix2datetime(1746748800))
+    @test sprint(show, flow) == "CashFlow($(business_time), Out, 1000.5 USD, 存入资金)"
+    vector_display = sprint(show, MIME"text/plain"(), [flow])
+    @test occursin("Cash Flows: 1", vector_display)
+    @test occursin("$(business_time) | Out | 1000.5 USD | 存入资金", vector_display)
+end
+
+@testset "Trade position display" begin
+    funds = FundPositionsResponse(FundPositionChannel[])
+    stocks = StockPositionsResponse([StockPositionChannel("lb", [])])
+
+    @test sprint(show, funds) == "Fund Positions: 0 funds in 0 channels"
+    @test sprint(show, stocks) == "Stock Positions: 0 stocks in 1 channel\n  - lb: 0 stocks"
 end
 
 # =========================================================================

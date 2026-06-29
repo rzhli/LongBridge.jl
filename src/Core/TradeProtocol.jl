@@ -717,7 +717,14 @@ struct FrozenTransactionFee
     currency::Currency.T
     frozen_transaction_fee::Float64
 end
-StructTypes.StructType(::Type{FrozenTransactionFee}) = StructTypes.Struct()
+StructTypes.StructType(::Type{FrozenTransactionFee}) = StructTypes.CustomStruct()
+
+function StructTypes.construct(::Type{FrozenTransactionFee}, obj::JSON3.Object)
+    FrozenTransactionFee(
+        safeparse(Currency.T, obj.currency),
+        safeparse(Float64, obj.frozen_transaction_fee),
+    )
+end
 
 function Base.show(io::IO, fee::FrozenTransactionFee)
     print(io, "    - Currency: ", fee.currency, ", Fee: ", fee.frozen_transaction_fee)
@@ -791,13 +798,13 @@ function StructTypes.construct(::Type{AccountBalance}, obj::JSON3.Object)
         safeparse(RiskLevel.T, obj.risk_level),
         safeparse(Float64, obj.margin_call),
         safeparse(Currency.T, obj.currency),
-        obj.cash_infos,
+        [StructTypes.construct(CashInfo, item) for item in obj.cash_infos],
         safeparse(Float64, obj.net_assets),
         safeparse(Float64, obj.init_margin),
         safeparse(Float64, obj.maintenance_margin),
         safeparse(Float64, obj.buy_power),
-        obj.frozen_transaction_fees,
-        haskey(obj, :market) ? obj.market : nothing,
+        [StructTypes.construct(FrozenTransactionFee, item) for item in obj.frozen_transaction_fees],
+        haskey(obj, :market) && !isnothing(obj.market) ? safeparse(Market.T, obj.market) : nothing,
     )
 end
 
@@ -843,7 +850,75 @@ struct CashFlow
     symbol::Union{String,Nothing}
     description::String
 end
-StructTypes.StructType(::Type{CashFlow}) = StructTypes.Struct()
+StructTypes.StructType(::Type{CashFlow}) = StructTypes.CustomStruct()
+
+function _cash_flow_datetime(val)
+    if val isa DateTime
+        return val
+    elseif val isa Integer
+        return unix2datetime(val)
+    else
+        sval = String(val)
+        return all(isdigit, sval) ? unix2datetime(parse(Int64, sval)) : DateTime(sval)
+    end
+end
+
+function StructTypes.construct(::Type{CashFlow}, obj::JSON3.Object)
+    CashFlow(
+        string(obj.transaction_flow_name),
+        safeparse(CashFlowDirection.T, obj.direction),
+        safeparse(BalanceType.T, obj.business_type),
+        safeparse(Float64, obj.balance),
+        string(obj.currency),
+        _cash_flow_datetime(obj.business_time),
+        haskey(obj, :symbol) && !isnothing(obj.symbol) ? string(obj.symbol) : nothing,
+        haskey(obj, :description) && !isnothing(obj.description) ? string(obj.description) : "",
+    )
+end
+
+_short_enum_name(e) = last(split(string(e), "."))
+_count_label(n::Integer, singular::String, plural::String = string(singular, "s")) =
+    string(n, " ", n == 1 ? singular : plural)
+
+function Base.show(io::IO, flow::CashFlow)
+    print(
+        io,
+        "CashFlow(",
+        flow.business_time,
+        ", ",
+        _short_enum_name(flow.direction),
+        ", ",
+        flow.balance,
+        " ",
+        flow.currency,
+        ", ",
+        flow.transaction_flow_name,
+    )
+    if !isnothing(flow.symbol) && !isempty(flow.symbol)
+        print(io, ", ", flow.symbol)
+    end
+    print(io, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", flows::Vector{CashFlow})
+    println(io, "Cash Flows: ", length(flows))
+    for flow in flows
+        println(
+            io,
+            "  - ",
+            flow.business_time,
+            " | ",
+            _short_enum_name(flow.direction),
+            " | ",
+            flow.balance,
+            " ",
+            flow.currency,
+            " | ",
+            flow.transaction_flow_name,
+            !isnothing(flow.symbol) && !isempty(flow.symbol) ? " | $(flow.symbol)" : "",
+        )
+    end
+end
 
 """
 Fund position
@@ -859,6 +934,20 @@ struct FundPosition
 end
 StructTypes.StructType(::Type{FundPosition}) = StructTypes.Struct()
 
+function Base.show(io::IO, pos::FundPosition)
+    print(
+        io,
+        pos.symbol,
+        isempty(pos.symbol_name) ? "" : " ($(pos.symbol_name))",
+        ": ",
+        pos.holding_units,
+        " units, NAV ",
+        pos.current_net_asset_value,
+        " ",
+        pos.currency,
+    )
+end
+
 """
 Fund position channel
 """
@@ -868,6 +957,10 @@ struct FundPositionChannel
 end
 StructTypes.StructType(::Type{FundPositionChannel}) = StructTypes.Struct()
 
+function Base.show(io::IO, channel::FundPositionChannel)
+    print(io, channel.account_channel, ": ", _count_label(length(channel.fund_info), "fund"))
+end
+
 """
 Fund positions response
 """
@@ -875,6 +968,28 @@ struct FundPositionsResponse
     list::Vector{FundPositionChannel}
 end
 StructTypes.StructType(::Type{FundPositionsResponse}) = StructTypes.Struct()
+
+function Base.show(io::IO, resp::FundPositionsResponse)
+    total = 0
+    for channel in resp.list
+        total += length(channel.fund_info)
+    end
+    print(
+        io,
+        "Fund Positions: ",
+        _count_label(total, "fund"),
+        " in ",
+        _count_label(length(resp.list), "channel"),
+    )
+    for channel in resp.list
+        println(io)
+        print(io, "  - ", channel)
+        for pos in channel.fund_info
+            println(io)
+            print(io, "    ", pos)
+        end
+    end
+end
 
 """
 Stock position
@@ -891,6 +1006,22 @@ struct StockPosition
 end
 StructTypes.StructType(::Type{StockPosition}) = StructTypes.Struct()
 
+function Base.show(io::IO, pos::StockPosition)
+    print(
+        io,
+        pos.symbol,
+        isempty(pos.symbol_name) ? "" : " ($(pos.symbol_name))",
+        ": qty ",
+        pos.quantity,
+        ", available ",
+        pos.available_quantity,
+        ", cost ",
+        pos.cost_price,
+        " ",
+        pos.currency,
+    )
+end
+
 """
 Stock position channel
 """
@@ -900,6 +1031,10 @@ struct StockPositionChannel
 end
 StructTypes.StructType(::Type{StockPositionChannel}) = StructTypes.Struct()
 
+function Base.show(io::IO, channel::StockPositionChannel)
+    print(io, channel.account_channel, ": ", _count_label(length(channel.stock_info), "stock"))
+end
+
 """
 Stock positions response
 """
@@ -907,6 +1042,28 @@ struct StockPositionsResponse
     list::Vector{StockPositionChannel}
 end
 StructTypes.StructType(::Type{StockPositionsResponse}) = StructTypes.Struct()
+
+function Base.show(io::IO, resp::StockPositionsResponse)
+    total = 0
+    for channel in resp.list
+        total += length(channel.stock_info)
+    end
+    print(
+        io,
+        "Stock Positions: ",
+        _count_label(total, "stock"),
+        " in ",
+        _count_label(length(resp.list), "channel"),
+    )
+    for channel in resp.list
+        println(io)
+        print(io, "  - ", channel)
+        for pos in channel.stock_info
+            println(io)
+            print(io, "    ", pos)
+        end
+    end
+end
 
 """
 Today execution response
