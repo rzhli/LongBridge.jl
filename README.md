@@ -6,7 +6,18 @@ This is an unofficial SDK, currently for personal use only. Some functions in th
 ## Release Notes
 See [NEWS.md](NEWS.md) for detailed release notes.
 
-Latest release: **v0.9.6** — HTTP client tuned against the HTTP.jl 2.x API.
+Latest release: **v0.10.0** — sync with upstream openapi v4.2.1→v5.1.0: Signal & Grid Contexts, multi-leg option orders, option chain moved to HTTP. Contains breaking changes.
+
+### v0.10.0 migration notes
+
+- **Option chain (breaking):** `option_chain_info_by_date(ctx, symbol, expiry_date; standard_only=false)` now returns `Vector{OptionChainContract}` (one entry per contract) from the HTTP endpoint. Filter on `direction` (`OptionDirection.Call`/`Put`) instead of reading the old paired `call_symbol`/`put_symbol`. New enums `OptionDirection`, `OptionExpiryCycleType`, `OptionStandardAttr`; the client-side cache is gone. `option_chain_expiry_date_list` is unchanged.
+- **`history_executions` (breaking):** returns `Vector{Execution}` and auto-pages through all results, instead of a single `ExecutionResponse` page.
+- **`Execution` (breaking):** gained a `side::OrderSide.T` field.
+- **`all_executions` re-enabled:** `all_executions(ctx; symbol, order_id, start_at, end_at, page)` → `GET /v3/trade/execution/all`.
+- **Multi-leg orders:** `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)` for vertical/calendar spreads, straddles, strangles, collars. `Order`/`OrderDetail` now expose `multi_leg`.
+- **New `SignalContext`:** `signals`, `signal`, `security_facts`.
+- **New `GridContext`:** `grid_submit`/`grid_replace`/`grid_list`/`grid_list_by_ids`/`grid_detail`/`grid_trigger_history`/`grid_cancel`/`grid_suspend`/`grid_restart`/`grid_symbol_info`.
+- **`valuation_comparison`:** now sends `symbol` + `comparison_symbols` directly (public signature unchanged).
 
 ### v0.9.6 migration notes
 
@@ -309,7 +320,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `capital_distribution(ctx, symbol)`: Get capital distribution for a security for the current day
 - `candlesticks(ctx, symbol, period, count)`: Get candlestick data
 - `history_candlesticks_by_offset(ctx, ...)`: Get historical K-line data by offset
-- `option_chain_info_by_date(ctx, symbol, expiry_date)`: Get option chain information for a specific expiry date
+- `option_chain_info_by_date(ctx, symbol, expiry_date; standard_only=false)`: Get the option chain contracts for a specific expiry date (returns `Vector{OptionChainContract}`; filter on `direction`)
 - `subscriptions(ctx)`: Query currently subscribed securities
 - `calc_indexes(ctx, symbols)`: Get calculated indexes
 - `market_temperature(ctx, market)`: Get market temperature
@@ -348,9 +359,11 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `today_orders(ctx; symbol, status, side)`: Get today's orders
 - `history_orders(ctx; symbol, status, side, start_at, end_at)`: Get historical orders
 - `today_executions(ctx; symbol)`: Get today's executions
-- `history_executions(ctx; symbol, start_at, end_at)`: Get historical executions
-- `order_detail(ctx, order_id)`: Get order detail
+- `history_executions(ctx; symbol, start_at, end_at)`: Get all historical executions (auto-paged, returns `Vector{Execution}`)
+- `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: Get all executions (`AllExecutionsResponse`)
+- `order_detail(ctx, order_id)`: Get order detail (includes `multi_leg` for combination orders)
 - `submit_order(ctx, ::SubmitOrderOptions)`: Submit an order
+- `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: Submit a multi-leg option combination order
 - `replace_order(ctx, ::ReplaceOrderOptions)`: Modify an order
 - `cancel_order(ctx, order_id)`: Cancel an order
 - `estimate_max_purchase_quantity(ctx, ::EstimateMaxPurchaseQuantityOptions)`: Estimate max purchase quantity
@@ -477,6 +490,23 @@ Unix-seconds value as `timestamp_unix` without changing the default columns.
 ### Quote (`QuoteContext`, breaking + new in v0.8.0)
 - `short_positions(ctx, symbol; count=20)`: **Breaking** — unified HK + US short-position endpoint (was US-only with fixed `last_timestamp=0, page_size=100`). The item struct is now `ShortPositionsItem` and the response drops `symbol`/`sources`. Timestamps are `DateTime` (UTC).
 - `short_trades(ctx, symbol; count=20)`: HK/US short-trade records, endpoint auto-selected by `.HK` suffix.
+
+### Strategy Signals (`SignalContext`, new in v0.10.0)
+- `SignalContext(config)`: Create context (HTTP-only, no disconnect needed)
+- `signals(ctx, ::SignalsOptions)`: Query signals, filtered by symbol/strategy/catalyst/time, paged with `limit`/`offset`
+- `signal(ctx, signal_id)`: One signal including the full analysis in `json_data`
+- `security_facts(ctx, ::SecurityFactsOptions)`: A security's catalyst-fact events (anomaly detections, factor readings, sources, NL summaries)
+
+### Grid Trading (`GridContext`, new in v0.10.0)
+- `GridContext(config)`: Create context (HTTP-only, no disconnect needed)
+- `grid_submit(ctx, ::SubmitGridOrderOptions)`: Submit a grid order
+- `grid_replace(ctx, ::ReplaceGridOrderOptions)`: Modify a grid order
+- `grid_list(ctx; page, limit, market, status, symbol, sort_by, sort_order)`: List grid orders
+- `grid_list_by_ids(ctx, ::GetGridOrdersByIdsOptions)`: List grid orders by IDs
+- `grid_detail(ctx, ::GetGridOrderDetailOptions)`: Grid order detail
+- `grid_trigger_history(ctx, ::GetGridTriggerHistoryOptions)`: Grid trigger history
+- `grid_cancel` / `grid_suspend` / `grid_restart(ctx, order_id)`: Cancel / suspend / restart a grid order
+- `grid_symbol_info(ctx, symbol)`: Grid symbol info
 
 ## License
 

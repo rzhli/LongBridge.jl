@@ -1,5 +1,32 @@
 # Release Notes
 
+## v0.10.0 (2026-09-22)
+
+Sync with upstream `longbridge-openapi` v4.2.1 → v5.1.0. Adds two new Contexts (Signal, Grid), multi-leg option orders, and moves the option chain onto an HTTP endpoint. Contains breaking changes.
+
+### Breaking changes
+
+- **Option chain moved to an HTTP endpoint (#588).** `option_chain_info_by_date(ctx, symbol, expiry_date)` is now backed by `GET /v1/gemini/option/option_chain_list` instead of quote socket command `21`. It returns `Vector{OptionChainContract}` (one entry per contract) instead of the strike-paired `StrikePriceInfo`. A strike listed on one side only now yields a single entry, so filter on `direction` (`OptionDirection.Call` / `Put`) instead of reading `call_symbol` / `put_symbol`. New `standard_only::Bool = false` keyword. New enums `OptionDirection`, `OptionExpiryCycleType`, `OptionStandardAttr`. The 30-minute client-side cache is gone. `option_chain_expiry_date_list` is unchanged (still socket command `20`).
+- **`history_executions` now returns `Vector{Execution}` (#591)** instead of `ExecutionResponse`. It transparently pages through all `has_more` results (deduping by `trade_id`), so callers no longer see or handle pagination.
+- **`Execution` gained a `side::OrderSide.T` field.** Positional constructors must supply it.
+- **`valuation_comparison` (#581)** now sends `symbol` and `comparison_symbols` (repeated query array) directly instead of converting to counter-ids. The public signature is unchanged.
+
+### New features
+
+- **Multi-leg option orders (#575, #590).** `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)` → `POST /v1/trade/order/multileg` submits a combination order (vertical spreads, straddles, strangles, collars, calendar spreads) whose legs are placed as a single strategy order. New `MultiLegStrategy` enum (including `CalendarCallSpread` / `CalendarPutSpread`), `MultiLegPosition`, `ContractDirection`, and the leg/info types `SubmitMultiLegOrderLeg` / `SubmitMultiLegOrderOptions` / `MultiLegOrderLeg` / `MultiLegInfo`. `Order` and `OrderDetail` now carry a `multi_leg::Union{MultiLegInfo,Nothing}` field, populated on `today_orders` / `history_orders` / `order_detail`.
+- **`SignalContext` (#577, #578).** Strategy signals and catalyst facts: `signals(ctx, ::SignalsOptions)` (`GET /v1/signals`), `signal(ctx, id)` (`GET /v1/signals/{id}`), `security_facts(ctx, ::SecurityFactsOptions)` (`GET /v1/facts/security_facts`). New types `Signal`, `SignalsResponse`, `SecurityFact`, `Outlook`, `SignalStatus`, `FactType`, `FactDirection`, and the fact detail types; `nl_tags` parses the JSON-in-a-string NL fields.
+- **`GridContext` (#570).** Grid trading: `grid_submit`, `grid_replace`, `grid_list`, `grid_list_by_ids`, `grid_detail`, `grid_trigger_history`, `grid_cancel`, `grid_suspend`, `grid_restart`, `grid_symbol_info`. Methods are `grid_`-prefixed to avoid Base/namespace collisions. New `GridTradeRule`, `GridOrder`, `GridOrderDetail`, `GridSymbolInfo`, and the `TriggerPriceType` / `GridTimeInForce` / `GridLimitEvent` enums.
+- **`all_executions` re-enabled (#4f988fe).** `all_executions(ctx; ...)` → `GET /v3/trade/execution/all` returns `AllExecutionsResponse`. `Execution` in its `trades` carries the new `side` field.
+
+### Not ported
+
+- `public_agents` (AI agents, #565) — deliberately skipped.
+- `submit_strategy_questionnaire` — removed upstream in #585, never existed here.
+
+### Tests
+
+- Added `test/test_v0_10_0_sync.jl` covering exports, option-chain contract parsing, multi-leg strategy + `multi_leg` readback, signal/fact parsing, and grid rule serialization.
+
 ## v0.9.6 (2026-09-05)
 
 ### HTTP client (HTTP.jl 2.x)

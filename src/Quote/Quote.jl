@@ -43,6 +43,10 @@ using ..QuoteProtocol:
     OptionChainDateListResponse,
     OptionChainDateStrikeInfoRequest,
     OptionChainDateStrikeInfoResponse,
+    OptionChainContract,
+    OptionDirection,
+    OptionExpiryCycleType,
+    OptionStandardAttr,
     IssuerInfoResponse,
     WarrantFilterListRequest,
     FilterConfig,
@@ -1091,20 +1095,38 @@ function option_chain_expiry_date_list(ctx::QuoteContext, symbol::AbstractString
     return resp.expiry_date
 end
 
+"""
+    option_chain_info_by_date(ctx, symbol, expiry_date; standard_only=false) -> Vector{OptionChainContract}
+
+获取某标的在指定到期日的期权链合约列表。
+
+`standard_only=true` 只返回标准合约；`false`（默认）返回全部。
+
+返回每合约一条的 `OptionChainContract`（不再按行权价配对）。只在一侧挂牌的
+行权价现在只有一条记录，调用方应按 `direction` 过滤 call/put。
+
+端点：`GET /v1/gemini/option/option_chain_list`（#588 起改为 HTTP，不再缓存）
+"""
 function option_chain_info_by_date(
     ctx::QuoteContext,
     symbol::AbstractString,
-    expiry_date::Date,
+    expiry_date::Date;
+    standard_only::Bool = false,
 )
-    req = OptionChainDateStrikeInfoRequest(String(symbol), expiry_date)
-    cmd = GenericRequestCmd(
-        QuoteCommand.QueryOptionChainDateStrikeInfo,
-        req,
-        OptionChainDateStrikeInfoResponse,
-        Channel(1),
+    params = Dict{String,Any}(
+        "symbol" => String(symbol),
+        "expiry_date" => Dates.format(expiry_date, dateformat"yyyymmdd"),
     )
-    resp = request(ctx, cmd)
-    return to_namedtuple(resp.strike_price_info)
+    # false 与省略等价，只在 true 时发送
+    standard_only && (params["standard_only"] = true)
+    resp = Errors.ApiResponse(
+        Client.http_get(ctx.inner.config, "/v1/gemini/option/option_chain_list"; params),
+    )
+    resp.code == 0 ||
+        @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    list = get(resp.data, :list, nothing)
+    isnothing(list) && return OptionChainContract[]
+    return OptionChainContract[construct(OptionChainContract, x) for x in list]
 end
 
 function warrant_issuers(ctx::QuoteContext)

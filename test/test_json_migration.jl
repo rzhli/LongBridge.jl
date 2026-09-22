@@ -114,13 +114,15 @@ end
     executions = JSON.parse(
         """
         {"trades":[{"order_id":"1","trade_id":"t1","symbol":"700.HK",
-                    "trade_done_at":"2022-05-04T09:34:57","quantity":100,"price":11.9}],
+                    "trade_done_at":"2022-05-04T09:34:57","quantity":100,"price":11.9,
+                    "side":"Buy"}],
          "has_more":false}""",
         ExecutionResponse,
     )
     @test executions.has_more === false
     @test executions.trades[1] isa Execution
     @test executions.trades[1].trade_done_at == DateTime(2022, 5, 4, 9, 34, 57)
+    @test executions.trades[1].side === OrderSide.Buy
 
     detail = JSON.parse(
         """

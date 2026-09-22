@@ -2,8 +2,9 @@ using Test, JSON, HTTP
 
 @testset "v0.9.1 upstream v4.4.1 sync" begin
     @test VersionNumber(LongBridge.VERSION) >= v"0.9.1"
-    @test !isdefined(LongBridge, :all_executions)
-    @test !isdefined(LongBridge.Trade, :all_executions)
+    # all_executions was re-enabled upstream and ported here; it is now exported.
+    @test isdefined(LongBridge, :all_executions)
+    @test isdefined(LongBridge.Trade, :all_executions)
 
     headers = [
         "X-Trace-ID" => "trace-463",

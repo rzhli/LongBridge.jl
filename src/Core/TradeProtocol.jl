@@ -29,6 +29,14 @@ export Command,
     Execution,
     OrderSide,
     OrderTag,
+    MultiLegStrategy,
+    MultiLegPosition,
+    ContractDirection,
+    MultiLegOrderLeg,
+    MultiLegInfo,
+    SubmitMultiLegOrderLeg,
+    SubmitMultiLegOrderOptions,
+    multileg_strategy_str,
     TimeInForceType,
     TriggerStatus,
     OutsideRTH,
@@ -393,6 +401,75 @@ Order tag
     Grey = 3
 end
 
+# ── 多腿期权组合订单（#575 + #590）────────────────────────────────
+# 多腿策略类型。服务端按字符串名读写（如 "VerticalCallSpread"），
+# 反序列化也接受数字别名 "0".."8"。
+@enumx MultiLegStrategy begin
+    Unknown = -1
+    CoveredCall = 0
+    CoveredPut = 1
+    VerticalCallSpread = 2
+    VerticalPutSpread = 3
+    Collar = 4
+    Straddle = 5
+    Strangle = 6
+    CalendarCallSpread = 7
+    CalendarPutSpread = 8
+end
+const _MULTILEG_STRATEGY_NAMES = Dict(
+    MultiLegStrategy.CoveredCall => "CoveredCall",
+    MultiLegStrategy.CoveredPut => "CoveredPut",
+    MultiLegStrategy.VerticalCallSpread => "VerticalCallSpread",
+    MultiLegStrategy.VerticalPutSpread => "VerticalPutSpread",
+    MultiLegStrategy.Collar => "Collar",
+    MultiLegStrategy.Straddle => "Straddle",
+    MultiLegStrategy.Strangle => "Strangle",
+    MultiLegStrategy.CalendarCallSpread => "CalendarCallSpread",
+    MultiLegStrategy.CalendarPutSpread => "CalendarPutSpread",
+)
+multileg_strategy_str(s::MultiLegStrategy.T) = get(_MULTILEG_STRATEGY_NAMES, s, "")
+function JSON.lift(::Type{MultiLegStrategy.T}, value::AbstractString)
+    for (k, v) in _MULTILEG_STRATEGY_NAMES
+        value == v && return k
+    end
+    # 数字别名
+    n = tryparse(Int, value)
+    isnothing(n) || (0 <= n <= 8 && return MultiLegStrategy.T(n))
+    return MultiLegStrategy.Unknown
+end
+JSON.lift(::Type{MultiLegStrategy.T}, value::Symbol) =
+    JSON.lift(MultiLegStrategy.T, String(value))
+JSON.lift(::Type{MultiLegStrategy.T}, value::Integer) =
+    (0 <= value <= 8) ? MultiLegStrategy.T(Int(value)) : MultiLegStrategy.Unknown
+
+# 持仓方向
+@enumx MultiLegPosition begin
+    Unknown = 0
+    Long = 1
+    Short = 2
+end
+function JSON.lift(::Type{MultiLegPosition.T}, value::AbstractString)
+    value == "LONG" && return MultiLegPosition.Long
+    value == "SHORT" && return MultiLegPosition.Short
+    return MultiLegPosition.Unknown
+end
+JSON.lift(::Type{MultiLegPosition.T}, value::Symbol) =
+    JSON.lift(MultiLegPosition.T, String(value))
+
+# 合约类型（call/put）
+@enumx ContractDirection begin
+    Unknown = 0
+    Call = 1
+    Put = 2
+end
+function JSON.lift(::Type{ContractDirection.T}, value::AbstractString)
+    value == "C" && return ContractDirection.Call
+    value == "P" && return ContractDirection.Put
+    return ContractDirection.Unknown
+end
+JSON.lift(::Type{ContractDirection.T}, value::Symbol) =
+    JSON.lift(ContractDirection.T, String(value))
+
 # LongBridge sends `"Gtc"`/`"GTC"` where the enum member is `LongTerm`, so the
 # default name-matching `lift` for enums is not enough: JSON.jl calls `JSON.lift`
 # whenever a JSON value has to become an `OrderTag.T`.
@@ -526,6 +603,56 @@ struct Execution
     trade_done_at::DateTime
     quantity::Int64
     price::Float64
+    side::OrderSide.T
+end
+
+# --- 多腿组合订单：回读结构（today_orders/history_orders/order_detail/push）---
+
+"""组合订单中的一条腿（服务端回读）。"""
+struct MultiLegOrderLeg
+    symbol::String                       # 期权合约代码，ticker.region
+    side::OrderSide.T                    # 订单方向
+    position::MultiLegPosition.T         # 持仓方向
+    ratio_quantity::Float64              # 腿的比例数量
+    strike_price::Union{Float64,Nothing} # 行权价
+    expire_date::Union{Date,Nothing}     # 到期日
+    contract_direction::ContractDirection.T  # 合约类型
+end
+function construct(::Type{MultiLegOrderLeg}, obj::JSONObject)
+    sp = get(obj, :strike_price, nothing)
+    ed = get(obj, :expire_date, nothing)
+    rq = get(obj, :ratio_quantity, "")
+    MultiLegOrderLeg(
+        String(get(obj, :symbol, "")),
+        JSON.lift(OrderSide.T, get(obj, :side, "")),
+        JSON.lift(MultiLegPosition.T, String(get(obj, :position, ""))),
+        (isnothing(rq) || rq == "") ? 0.0 : parse(Float64, string(rq)),
+        (isnothing(sp) || sp == "") ? nothing : parse(Float64, string(sp)),
+        (isnothing(ed) || ed == "") ? nothing : Date(string(ed), dateformat"yyyymmdd"),
+        JSON.lift(ContractDirection.T, String(get(obj, :contract_direction, ""))),
+    )
+end
+
+"""组合订单的多腿策略信息（服务端回读）。"""
+struct MultiLegInfo
+    strategy::MultiLegStrategy.T
+    strategy_name::String
+    multileg_id::String
+    code::String
+    legs::Vector{MultiLegOrderLeg}
+end
+function construct(::Type{MultiLegInfo}, obj::JSONObject)
+    legs_raw = get(obj, :legs, nothing)
+    legs =
+        isnothing(legs_raw) ? MultiLegOrderLeg[] :
+        MultiLegOrderLeg[construct(MultiLegOrderLeg, x) for x in legs_raw]
+    MultiLegInfo(
+        JSON.lift(MultiLegStrategy.T, String(get(obj, :strategy, ""))),
+        String(get(obj, :strategy_name, "")),
+        String(get(obj, :multileg_id, "")),
+        String(get(obj, :code, "")),
+        legs,
+    )
 end
 
 """
@@ -558,6 +685,7 @@ struct Order
     currency::String
     outside_rth::OutsideRTH.T
     remark::String
+    multi_leg::Union{MultiLegInfo,Nothing}
 end
 
 
@@ -697,6 +825,7 @@ struct OrderDetail
     platform_deducted_currency::Union{String,Nothing}
     history::Vector{OrderHistoryDetail}
     charge_detail::OrderChargeDetail
+    multi_leg::Union{MultiLegInfo,Nothing}
 end
 
 function Base.show(io::IO, d::OrderDetail)
@@ -1086,6 +1215,28 @@ end
 
 # --- Request Option Structs ---
 
+"""提交组合订单的一条腿：`symbol` + 正数 `ratio_quantity`。方向由 `strategy` 与订单 `side` 隐含决定，不看比例正负。"""
+Base.@kwdef struct SubmitMultiLegOrderLeg
+    symbol::String
+    ratio_quantity::Float64
+end
+
+"""
+提交多腿期权组合订单的参数（`POST /v1/trade/order/multileg`）。
+
+`submitted_price` 对 LO 等限价类型必填；`client_request_id` 用于 10 分钟幂等控制。
+"""
+Base.@kwdef struct SubmitMultiLegOrderOptions
+    side::OrderSide.T
+    order_type::OrderType.T
+    submitted_quantity::Int64
+    strategy::MultiLegStrategy.T
+    legs::Vector{SubmitMultiLegOrderLeg}
+    submitted_price::Union{Float64,Nothing} = nothing
+    remark::Union{String,Nothing} = nothing
+    client_request_id::Union{String,Nothing} = nothing
+end
+
 Base.@kwdef struct SubmitOrderOptions
     symbol::String
     order_type::OrderType.T
@@ -1117,6 +1268,7 @@ Base.@kwdef struct GetHistoryExecutionsOptions
     symbol::Union{String,Nothing} = nothing
     start_at::Union{Date,Nothing} = nothing
     end_at::Union{Date,Nothing} = nothing
+    page::Union{Integer,Nothing} = nothing
 end
 
 Base.@kwdef struct GetTodayExecutionsOptions

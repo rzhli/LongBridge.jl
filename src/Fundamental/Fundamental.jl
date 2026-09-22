@@ -747,7 +747,8 @@ end
 
 某证券与可选同业的估值对比（含 PE/PB/PS 历史曲线）。
 
-`comparison_symbols`：可选对比 symbol 列表，内部会逐个转 `counter_id` 后序列化。
+`comparison_symbols`：可选对比 symbol 列表，作为重复键数组
+（`comparison_symbols=A&comparison_symbols=B`）直接发送用户 symbol。
 
 端点：`GET /v1/quote/compare/valuation`
 """
@@ -758,12 +759,11 @@ function valuation_comparison(
     comparison_symbols::Union{AbstractVector{<:AbstractString},Nothing} = nothing,
 )
     params = Dict{String,Any}(
-        "counter_id" => symbol_to_counter_id(symbol),
+        "symbol" => String(symbol),
         "currency" => String(currency),
     )
     if !isnothing(comparison_symbols)
-        ids = String[symbol_to_counter_id(s) for s in comparison_symbols]
-        params["comparison_counter_ids"] = JSON.json(ids)
+        params["comparison_symbols"] = String[String(s) for s in comparison_symbols]
     end
     resp = ApiResponse(Client.http_get(ctx.config, "/v1/quote/compare/valuation"; params))
     _check(resp)

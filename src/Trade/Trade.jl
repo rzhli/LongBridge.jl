@@ -23,10 +23,12 @@ export TradeContext,
     unsubscribe,
     history_executions,
     today_executions,
+    all_executions,
     history_orders,
     today_orders,
     replace_order,
     submit_order,
+    submit_multileg,
     cancel_order,
     account_balance,
     cash_flow,
@@ -444,7 +446,31 @@ function _parse_order_data(o)
     d["trailing_amount"] = safeparse(Float64, d["trailing_amount"])
     d["trailing_percent"] = safeparse(Float64, d["trailing_percent"])
     d["limit_offset"] = safeparse(Float64, d["limit_offset"])
+    d["multi_leg"] = _parse_multi_leg(get(d, "multi_leg", nothing))
     return d
+end
+
+# 预处理组合订单的 multi_leg 块，使其可被 JSON.jl 直接构造成 MultiLegInfo：
+# 腿的 ratio_quantity/strike_price 转数字（空→nothing），expire_date 从
+# yyyymmdd 转 ISO 日期串。空/缺失整体返回 nothing。
+function _parse_multi_leg(ml)
+    (isnothing(ml) || isempty(ml)) && return nothing
+    m = Dict{String,Any}(String(k) => v for (k, v) in ml)
+    legs_raw = get(m, "legs", nothing)
+    if !isnothing(legs_raw)
+        m["legs"] = map(legs_raw) do leg
+            l = Dict{String,Any}(String(k) => v for (k, v) in leg)
+            l["ratio_quantity"] = safeparse(Float64, get(l, "ratio_quantity", nothing))
+            sp = get(l, "strike_price", nothing)
+            l["strike_price"] = (isnothing(sp) || sp == "") ? nothing : safeparse(Float64, sp)
+            ed = get(l, "expire_date", nothing)
+            l["expire_date"] =
+                (isnothing(ed) || ed == "") ? nothing :
+                string(Date(string(ed), dateformat"yyyymmdd"))
+            return l
+        end
+    end
+    return m
 end
 
 # Helper: convert orders to DataFrame
@@ -486,12 +512,56 @@ function history_executions(
     start_at::Union{Date,Nothing} = nothing,
     end_at::Union{Date,Nothing} = nothing,
 )
-    options =
-        GetHistoryExecutionsOptions(symbol = symbol, start_at = start_at, end_at = end_at)
-    cmd = HttpGetCmd("/v1/trade/execution/history", to_dict(options), Channel(1))
+    # 端点每页上限 1000 条：按 1 起始的 `page` 参数翻页直到 `has_more` 为 false。
+    # 用 `trade_id` 去重，某页无新增即停止，防止网关忽略 `page` 造成死循环。
+    # 上限 1000 页作为兜底。
+    all_trades = Execution[]
+    seen = Set{String}()
+    for page = 1:1000
+        options = GetHistoryExecutionsOptions(
+            symbol = symbol,
+            start_at = start_at,
+            end_at = end_at,
+            page = page,
+        )
+        cmd = HttpGetCmd("/v1/trade/execution/history", to_dict(options), Channel(1))
+        resp = request(ctx, cmd)
+        resp.code == 0 ||
+            @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+        parsed = JSON.parse(JSON.json(resp.data), ExecutionResponse)
+        isempty(parsed.trades) && break
+        added = 0
+        for t in parsed.trades
+            if !(t.trade_id in seen)
+                push!(seen, t.trade_id)
+                push!(all_trades, t)
+                added += 1
+            end
+        end
+        (parsed.has_more && added > 0) || break
+    end
+    return all_trades
+end
+
+function all_executions(
+    ctx::TradeContext;
+    symbol::Union{String,Nothing} = nothing,
+    order_id::Union{String,Nothing} = nothing,
+    start_at::Union{Date,DateTime,Nothing} = nothing,
+    end_at::Union{Date,DateTime,Nothing} = nothing,
+    page::Union{Integer,Nothing} = nothing,
+)
+    options = GetAllExecutionsOptions(
+        symbol = symbol,
+        order_id = order_id,
+        start_at = start_at,
+        end_at = end_at,
+        page = page,
+    )
+    cmd = HttpGetCmd("/v3/trade/execution/all", to_dict(options), Channel(1))
     resp = request(ctx, cmd)
     if resp.code == 0
-        return JSON.parse(JSON.json(resp.data), ExecutionResponse)
+        return JSON.parse(JSON.json(resp.data), AllExecutionsResponse)
     else
         @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
     end
@@ -559,6 +629,44 @@ end
 
 function submit_order(ctx::TradeContext, options::SubmitOrderOptions)
     cmd = HttpPostCmd("/v1/trade/order", to_dict(options), Channel(1))
+    resp = request(ctx, cmd)
+    if resp.code == 0
+        return JSON.parse(JSON.json(resp.data), SubmitOrderResponse)
+    else
+        @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
+    end
+end
+
+"""
+    submit_multileg(ctx, options::SubmitMultiLegOrderOptions) -> SubmitOrderResponse
+
+提交多腿期权组合订单（垂直价差、跨式、勒式、领口、日历价差等），各腿作为一个
+策略订单一并下单。
+
+各腿方向由 `strategy` 与订单 `side` 隐含决定，`ratio_quantity` 必须为正数。
+
+端点：`POST /v1/trade/order/multileg`
+"""
+function submit_multileg(ctx::TradeContext, options::SubmitMultiLegOrderOptions)
+    # 与上游一致：strategy/side/order_type 按字符串名发送
+    body = Dict{String,Any}(
+        "side" => string(options.side),
+        "order_type" => string(options.order_type),
+        "submitted_quantity" => string(options.submitted_quantity),
+        "strategy" => multileg_strategy_str(options.strategy),
+        "legs" => [
+            Dict{String,Any}(
+                "symbol" => leg.symbol,
+                "ratio_quantity" => string(leg.ratio_quantity),
+            ) for leg in options.legs
+        ],
+    )
+    isnothing(options.submitted_price) ||
+        (body["submitted_price"] = string(options.submitted_price))
+    isnothing(options.remark) || (body["remark"] = options.remark)
+    isnothing(options.client_request_id) ||
+        (body["client_request_id"] = options.client_request_id)
+    cmd = HttpPostCmd("/v1/trade/order/multileg", body, Channel(1))
     resp = request(ctx, cmd)
     if resp.code == 0
         return JSON.parse(JSON.json(resp.data), SubmitOrderResponse)
@@ -717,6 +825,8 @@ function order_detail(ctx::TradeContext, order_id::AbstractString)
             end
             d["charge_detail"] = cd_dict
         end
+
+        d["multi_leg"] = _parse_multi_leg(get(d, "multi_leg", nothing))
 
         return JSON.parse(JSON.json(d), OrderDetail)
     else

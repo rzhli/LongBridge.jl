@@ -46,6 +46,8 @@ include("Core/DCAProtocol.jl")
 include("Core/ContentProtocol.jl")
 include("Core/AssetProtocol.jl")
 include("Core/ScreenerProtocol.jl")
+include("Core/SignalProtocol.jl")
+include("Core/GridProtocol.jl")
 include("OAuth.jl")
 include("Config.jl")
 include("Client.jl")
@@ -64,6 +66,8 @@ include("DCA/DCA.jl")
 include("Content/Content.jl")
 include("Asset/Asset.jl")
 include("Screener/Screener.jl")
+include("Signal/Signal.jl")
+include("Grid/Grid.jl")
 
 using .Constant: Market, Currency
 using .ControlProtocol
@@ -80,6 +84,8 @@ using .DCAProtocol
 using .ContentProtocol
 using .AssetProtocol
 using .ScreenerProtocol
+using .SignalProtocol
+using .GridProtocol
 using .Commands
 using .Cache
 using .OAuth
@@ -100,6 +106,8 @@ using .DCA
 using .Content
 using .Asset
 using .Screener
+using .SignalCtx
+using .GridCtx
 # `construct` is the package-owned constructor protocol for decoded JSON objects
 # (the JSON.jl 1.0 replacement for `StructTypes.construct`). Reachable as
 # `LongBridge.construct`, but deliberately not exported: the name is too generic.
@@ -225,9 +233,9 @@ export OrderType,
 # Context
 export TradeContext
 # 订单操作
-export submit_order, replace_order, cancel_order, order_detail
+export submit_order, submit_multileg, replace_order, cancel_order, order_detail
 # 订单查询
-export today_orders, history_orders, today_executions, history_executions
+export today_orders, history_orders, today_executions, history_executions, all_executions
 # 账户信息
 export account_balance,
     cash_flow, stock_positions, fund_positions, margin_ratio, estimate_max_purchase_quantity
@@ -576,6 +584,58 @@ export ScreenerCondition,
     ScreenerStrategyResponse,
     ScreenerSearchResponse,
     ScreenerIndicatorsResponse
+
+# --- Signal (策略信号 / 催化剂事实) ---
+export SignalContext, signals, signal, security_facts
+export SignalsOptions,
+    SignalsResponse,
+    Signal,
+    SecurityFactsOptions,
+    SecurityFact,
+    Outlook,
+    SignalStatus,
+    FactType,
+    FactDirection,
+    FactDataSource,
+    AnomalyThresholds,
+    AnomalyDetection,
+    FactFactor,
+    FactSymbol,
+    NlTag,
+    FactNlInfo,
+    nl_tags
+
+# --- Grid (网格交易) ---
+export GridContext,
+    grid_submit,
+    grid_replace,
+    grid_list,
+    grid_list_by_ids,
+    grid_detail,
+    grid_trigger_history,
+    grid_cancel,
+    grid_suspend,
+    grid_restart,
+    grid_symbol_info
+export TriggerPriceType,
+    GridTimeInForce,
+    GridLimitEvent,
+    GridTradeRule,
+    GridOrder,
+    GridOrderSubOrder,
+    GridOrderHistory,
+    GridOrderDetail,
+    TriggerOrder,
+    GridBidSize,
+    GridChannelInfo,
+    GridSymbolInfo,
+    SubmitGridOrderResponse,
+    SubmitGridOrderOptions,
+    ReplaceGridOrderOptions,
+    GetGridOrdersOptions,
+    GetGridOrdersByIdsOptions,
+    GetGridOrderDetailOptions,
+    GetGridTriggerHistoryOptions
 
 # ==================== Precompile workload ====================
 # Force compilation of the most-used construction paths so a fresh REPL

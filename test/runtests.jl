@@ -46,6 +46,9 @@ include("test_v0_9_3_release.jl")
 # v0.9.4 / immutable public handles with documented inner worker state
 include("test_v0_9_4_release.jl")
 
+# v0.10.0 / 上游 v4.2.1→v5.1.0（期权链 HTTP / 多腿订单 / SignalContext / GridContext）
+include("test_v0_10_0_sync.jl")
+
 # JSON3.jl -> JSON.jl 1.0 迁移：解析/构造行为回归
 include("test_json_migration.jl")
 

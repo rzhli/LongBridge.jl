@@ -5,8 +5,11 @@ module QuoteProtocol
 
 using ProtoBuf
 using EnumX
+using JSON
 using ProtoBuf.Codecs: BufferedVector
 using Dates
+using ..Utils: JSONObject
+import ..Utils: construct
 import ProtoBuf:
     ProtoDecoder,
     decode,
@@ -64,6 +67,10 @@ export QuoteCommand,
     OptionExtend,
     WarrantExtend,
     StrikePriceInfo,
+    OptionChainContract,
+    OptionDirection,
+    OptionExpiryCycleType,
+    OptionStandardAttr,
     SecurityDepthResponse,
     SecurityBrokersResponse,
     SecurityTradeRequest,
@@ -2545,6 +2552,80 @@ function decode(d::ProtoBuf.AbstractProtoDecoder, ::Type{<:StrikePriceInfo})
         end
     end
     return StrikePriceInfo(price, call_symbol, put_symbol, standard)
+end
+
+# ── 期权链 HTTP 端点类型（#588）────────────────────────────────────
+# `option_chain_info_by_date` 迁移到 HTTP 端点
+# `GET /v1/gemini/option/option_chain_list` 后，返回每合约一条的
+# `OptionChainContract`，取代旧的按行权价配对的 `StrikePriceInfo`。
+
+# 期权方向
+@enumx OptionDirection begin
+    Unknown = 0
+    Put = 1
+    Call = 2
+end
+# 服务端用 "P"/"C" 表示，空串/其他回落到 Unknown
+function JSON.lift(::Type{OptionDirection.T}, value::AbstractString)
+    value == "P" && return OptionDirection.Put
+    value == "C" && return OptionDirection.Call
+    return OptionDirection.Unknown
+end
+JSON.lift(::Type{OptionDirection.T}, value::Symbol) =
+    JSON.lift(OptionDirection.T, String(value))
+
+# 期权到期周期类型：服务端空串表示标准月度期权
+@enumx OptionExpiryCycleType begin
+    Unknown = 0
+    Monthly = 1
+    Weekly = 2
+    Quarterly = 3
+end
+function JSON.lift(::Type{OptionExpiryCycleType.T}, value::AbstractString)
+    value == "" && return OptionExpiryCycleType.Monthly
+    value == "W" && return OptionExpiryCycleType.Weekly
+    value == "Q" && return OptionExpiryCycleType.Quarterly
+    return OptionExpiryCycleType.Unknown
+end
+JSON.lift(::Type{OptionExpiryCycleType.T}, value::Symbol) =
+    JSON.lift(OptionExpiryCycleType.T, String(value))
+
+# 是否为公司行动遗留的老合约：服务端空串表示正常合约
+@enumx OptionStandardAttr begin
+    Unknown = 0
+    Normal = 1
+    Old = 2
+end
+function JSON.lift(::Type{OptionStandardAttr.T}, value::AbstractString)
+    value == "" && return OptionStandardAttr.Normal
+    value == "old" && return OptionStandardAttr.Old
+    return OptionStandardAttr.Unknown
+end
+JSON.lift(::Type{OptionStandardAttr.T}, value::Symbol) =
+    JSON.lift(OptionStandardAttr.T, String(value))
+
+# 期权合约（每合约一条）
+struct OptionChainContract
+    symbol::String                       # 期权合约代码，ticker.region
+    expiry_date::Date                    # 到期日（美东时间）
+    strike_price::Float64                # 行权价
+    direction::OptionDirection.T         # 合约方向
+    option_type::OptionExpiryCycleType.T # 特殊到期周期
+    standard_attr::OptionStandardAttr.T  # 是否老合约
+    days_to_expiry::Int32                # 距到期天数，到期日为 0，过期为负
+end
+function construct(::Type{OptionChainContract}, obj::JSONObject)
+    ed = String(get(obj, :expiry_date, ""))
+    sp = get(obj, :strike_price, "")
+    OptionChainContract(
+        String(get(obj, :symbol, "")),
+        isempty(ed) ? Date(0) : Date(ed, dateformat"yyyymmdd"),
+        (isnothing(sp) || sp == "") ? 0.0 : parse(Float64, string(sp)),
+        JSON.lift(OptionDirection.T, String(get(obj, :direction, ""))),
+        JSON.lift(OptionExpiryCycleType.T, String(get(obj, :option_type, ""))),
+        JSON.lift(OptionStandardAttr.T, String(get(obj, :standard_attr, ""))),
+        Int32(get(obj, :days_to_expiry, 0)),
+    )
 end
 
 struct OptionChainDateStrikeInfoResponse

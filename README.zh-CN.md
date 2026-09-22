@@ -6,7 +6,18 @@
 ## 更新日志
 详细更新说明请见 [NEWS.md](NEWS.md)。
 
-最新版本：**v0.9.6** —— 根据 HTTP.jl 2.x 源码优化 HTTP 层用法。
+最新版本：**v0.10.0** —— 跟进上游 openapi v4.2.1→v5.1.0：新增 Signal / Grid 两个 Context、多腿期权订单、期权链迁移到 HTTP 端点。含破坏性变更。
+
+### v0.10.0 迁移说明
+
+- **期权链（破坏性）：** `option_chain_info_by_date(ctx, symbol, expiry_date; standard_only=false)` 改走 HTTP 端点，返回 `Vector{OptionChainContract}`（每合约一条）。请按 `direction`（`OptionDirection.Call`/`Put`）过滤，不再读旧的配对字段 `call_symbol`/`put_symbol`。新增枚举 `OptionDirection`、`OptionExpiryCycleType`、`OptionStandardAttr`；取消客户端缓存。`option_chain_expiry_date_list` 不变。
+- **`history_executions`（破坏性）：** 返回 `Vector{Execution}` 并自动翻页取全部结果，不再是单页 `ExecutionResponse`。
+- **`Execution`（破坏性）：** 新增 `side::OrderSide.T` 字段。
+- **`all_executions` 重新启用：** `all_executions(ctx; symbol, order_id, start_at, end_at, page)` → `GET /v3/trade/execution/all`。
+- **多腿期权订单：** `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`，支持垂直/日历价差、跨式、勒式、领口等；`Order`/`OrderDetail` 新增 `multi_leg` 字段。
+- **新增 `SignalContext`：** `signals`、`signal`、`security_facts`。
+- **新增 `GridContext`：** `grid_submit`/`grid_replace`/`grid_list`/`grid_list_by_ids`/`grid_detail`/`grid_trigger_history`/`grid_cancel`/`grid_suspend`/`grid_restart`/`grid_symbol_info`。
+- **`valuation_comparison`：** 改为直接发送 `symbol` + `comparison_symbols`（公开签名不变）。
 
 ### v0.9.6 迁移说明
 
@@ -307,7 +318,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `capital_distribution(ctx, symbol)`: 获取标的当日资金分布
 - `candlesticks(ctx, symbol, period, count)`: 获取 K 线数据
 - `history_candlesticks_by_offset(ctx, ...)`: 按偏移量获取历史 K 线
-- `option_chain_info_by_date(ctx, symbol, expiry_date)`: 获取指定到期日的期权链信息
+- `option_chain_info_by_date(ctx, symbol, expiry_date; standard_only=false)`: 获取指定到期日的期权链合约列表（返回 `Vector{OptionChainContract}`，按 `direction` 过滤）
 - `subscriptions(ctx)`: 查询当前已订阅的标的
 - `calc_indexes(ctx, symbols)`: 获取计算指标
 - `market_temperature(ctx, market)`: 获取市场温度
@@ -346,9 +357,11 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `today_orders(ctx; symbol, status, side)`: 获取今日订单
 - `history_orders(ctx; symbol, status, side, start_at, end_at)`: 获取历史订单
 - `today_executions(ctx; symbol)`: 获取今日成交
-- `history_executions(ctx; symbol, start_at, end_at)`: 获取历史成交
-- `order_detail(ctx, order_id)`: 获取订单详情
+- `history_executions(ctx; symbol, start_at, end_at)`: 获取全部历史成交（自动翻页，返回 `Vector{Execution}`）
+- `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: 获取所有成交（`AllExecutionsResponse`）
+- `order_detail(ctx, order_id)`: 获取订单详情（组合订单含 `multi_leg`）
 - `submit_order(ctx, ::SubmitOrderOptions)`: 下单
+- `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: 提交多腿期权组合订单
 - `replace_order(ctx, ::ReplaceOrderOptions)`: 修改订单
 - `cancel_order(ctx, order_id)`: 撤单
 - `estimate_max_purchase_quantity(ctx, ::EstimateMaxPurchaseQuantityOptions)`: 预估最大购买数量
@@ -502,6 +515,23 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 ### 行情（QuoteContext，v0.8.0 破坏性变更 + 新增）
 - `short_positions(ctx, symbol; count=20)`：**破坏性** —— HK/US 统一端点（原 US 专用），`ShortPosition` → `ShortPositionsItem` 并新增 HK 字段；响应去掉 `symbol`/`sources` 外层字段；`timestamp` 由 `String` 改为 `DateTime` (UTC)。
 - `short_trades(ctx, symbol; count=20)`：HK/US 做空成交记录，按 `.HK` 后缀自动选择端点。
+
+### 策略信号（SignalContext，v0.10.0 新增）
+- `SignalContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
+- `signals(ctx, ::SignalsOptions)`: 按标的/策略/催化剂/时间过滤查询信号，`limit`/`offset` 分页
+- `signal(ctx, signal_id)`: 单条信号，含 `json_data` 完整分析
+- `security_facts(ctx, ::SecurityFactsOptions)`: 某标的的催化剂事实事件（异常检测、因子读数、来源、文本摘要）
+
+### 网格交易（GridContext，v0.10.0 新增）
+- `GridContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
+- `grid_submit(ctx, ::SubmitGridOrderOptions)`: 提交网格订单
+- `grid_replace(ctx, ::ReplaceGridOrderOptions)`: 修改网格订单
+- `grid_list(ctx; page, limit, market, status, symbol, sort_by, sort_order)`: 网格订单列表
+- `grid_list_by_ids(ctx, ::GetGridOrdersByIdsOptions)`: 按 ID 查询网格订单
+- `grid_detail(ctx, ::GetGridOrderDetailOptions)`: 网格订单详情
+- `grid_trigger_history(ctx, ::GetGridTriggerHistoryOptions)`: 网格触发历史
+- `grid_cancel` / `grid_suspend` / `grid_restart(ctx, order_id)`: 撤销 / 暂停 / 重启网格订单
+- `grid_symbol_info(ctx, symbol)`: 网格标的信息
 
 ## 许可证
 
