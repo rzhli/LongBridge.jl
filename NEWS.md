@@ -1,5 +1,32 @@
 # Release Notes
 
+## v0.11.0 (2026-10-01)
+
+Sync with upstream `longbridge/openapi` **v5.2.0** (`b2f749a3`, released 2026-09-30).
+
+### Breaking changes
+
+- `fund_positions(::TradeContext)` now exposes `FundPosition.counter_id` instead of `symbol`. New responses contain the full ID, e.g. `UT/FD/HK0000384492`; recover the ISIN with `last(split(position.counter_id, '/'))`. The legacy JSON key `symbol` remains accepted, preserving its original value. The request-side `symbol` filter is unchanged.
+
+### New features
+
+- **`FundContext`** adds all 28 mutual-fund endpoints: catalog and filters, fund detail and analysis, returns and performance, NAV, holdings, account positions, dividends, orders, transactions, order validation/submission/cancellation. Uses the existing synchronous HTTP client and authentication configuration.
+- Adds 39 response types and 14 keyword option structs. Numeric strings preserve backend precision, timestamps stay Unix seconds, and server-defined JSON fields remain decoded JSON values. Nullable nested objects accept `nothing`; `Int64` fields accept JSON numbers or numeric strings, including empty/unparseable strings as zero, matching upstream.
+- Public fund methods use `fund_` prefixes (except `hot_funds` and `funds`). `fund_positions` dispatches on either `TradeContext` or `FundContext`. The new account-position item is `FundHoldingPosition` and its request type is `FundPositionsOptions`, avoiding the existing trade types.
+- Full fund IDs are sent as `counter_id` query parameters. Latest NAV, performance and position performance send a single-element JSON array in `counter_ids`; order-list filters use repeated `counter_id` query parameters.
+- **Calendar pagination:** `finance_calendar` gains optional `count`, `offset`, and `next::CalendarPageDirection.T` keywords (`Later` / `Earlier`). Defaults preserve the existing call signature. `next_date` is returned unchanged, with null/missing cursors normalized to the empty string.
+
+### Examples and tests
+
+- Updates `quote_test.jl` with calendar pagination, fund market data, and option contracts selected from returned expiry dates. Updates `trade_test.jl` with the fund identifier migration, fund position/order examples, and the typed grid-list options. Both files use top-level examples for running individual requests interactively. Fund order writes remain commented out.
+- Adds loopback HTTP tests for all 28 fund endpoints, optional query/body serialization, response wrappers, nullable fields, number/string IDs, legacy holdings, and calendar pagination. No live orders are sent by these tests.
+- Validation: all 1,323 assertions in `test/runtests.jl` pass; both interactive example files pass syntax checks without executing live requests.
+
+### Documentation
+
+- Both READMEs show only the latest release notes; historical changes remain in this file. API overviews describe current behavior without old version labels.
+- Updates the reference links to `https://open.longbridge.com/docs` and `https://github.com/longbridge/openapi`, and corrects the documented `grid_list` option signature.
+
 ## v0.10.0 (2026-09-22)
 
 Sync with upstream `longbridge-openapi` v4.2.1 → v5.1.0. Adds two new Contexts (Signal, Grid), multi-leg option orders, and moves the option chain onto an HTTP endpoint. Contains breaking changes.
@@ -41,7 +68,7 @@ Sync with upstream `longbridge-openapi` v4.2.1 → v5.1.0. Adds two new Contexts
 
 ### Security
 
-- The OAuth callback server binds to `127.0.0.1` instead of `0.0.0.0`. The callback carries the authorization code and CSRF state, and the redirect URI is always `http://localhost:<port>/callback`, so the endpoint no longer needs to be reachable from the local network.
+- The OAuth callback server binds to `127.0.0.1` instead of `0.0.0.0`. The callback carries the authorization code and CSRF state, and the redirect URI is always `http://localhost:<port>/callback`, so the endpoint no longer needs to be reachable from the local network. Callers that previously reached the callback from another host should forward the port to loopback.
 
 ### Tests
 
@@ -92,6 +119,19 @@ Sync with upstream `longbridge-openapi` v4.2.1 → v5.1.0. Adds two new Contexts
 
 - Temporarily disables `all_executions` until the upstream API is available again; the request and response model types remain available for a future restoration.
 - Preserves the HTTP status, `x-trace-id`, complete response headers, and raw body in `UnexpectedHttpResponse` when an intermediary returns a non-OpenAPI error response.
+
+### HTTP error diagnostics
+
+```julia
+try
+    response = today_executions(ctx)
+catch err
+    if err isa UnexpectedHttpResponse
+        @error "unexpected upstream response" status=err.status trace_id=err.trace_id body=err.body
+    end
+    rethrow()
+end
+```
 
 ## v0.9.0 (2026-07-22)
 

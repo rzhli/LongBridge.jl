@@ -174,7 +174,7 @@ end
                                 "cost_net_asset_value":"1.0","holding_units":"100"}]}]}""",
         FundPositionsResponse,
     )
-    @test funds.list[1].fund_info[1].symbol == "HK0000447943"
+    @test funds.list[1].fund_info[1].counter_id == "HK0000447943"
 
     stocks = JSON.parse(
         """

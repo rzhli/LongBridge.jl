@@ -5,6 +5,7 @@ using ..Utils: Dec64, JSONObject, counter_id_to_symbol
 import ..Utils: _parse_optional_decimal, construct
 
 export CalendarCategory,
+    CalendarPageDirection,
     CalendarDataKv,
     CalendarEventInfo,
     CalendarDateGroup,
@@ -20,6 +21,12 @@ export CalendarCategory,
     Closed = 6   # 休市
     Meeting = 7   # 股东/分析师会议
     Merge = 8   # 合并/重组
+end
+
+"""Pagination direction for `finance_calendar`: `Later` or `Earlier`."""
+@enumx CalendarPageDirection begin
+    Later = 0
+    Earlier = 1
 end
 
 function _calendar_category_str(c::CalendarCategory.T)
@@ -131,7 +138,7 @@ function construct(::Type{CalendarEventsResponse}, obj::JSONObject)
     end
     CalendarEventsResponse(
         String(get(obj, :date, "")),
-        String(get(obj, :next_date, "")),
+        String(something(get(obj, :next_date, nothing), "")),
         groups,
     )
 end

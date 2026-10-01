@@ -48,6 +48,7 @@ include("Core/AssetProtocol.jl")
 include("Core/ScreenerProtocol.jl")
 include("Core/SignalProtocol.jl")
 include("Core/GridProtocol.jl")
+include("Core/FundProtocol.jl")
 include("OAuth.jl")
 include("Config.jl")
 include("Client.jl")
@@ -68,6 +69,7 @@ include("Asset/Asset.jl")
 include("Screener/Screener.jl")
 include("Signal/Signal.jl")
 include("Grid/Grid.jl")
+include("Fund/Fund.jl")
 
 using .Constant: Market, Currency
 using .ControlProtocol
@@ -86,6 +88,7 @@ using .AssetProtocol
 using .ScreenerProtocol
 using .SignalProtocol
 using .GridProtocol
+using .FundProtocol
 using .Commands
 using .Cache
 using .OAuth
@@ -108,6 +111,7 @@ using .Asset
 using .Screener
 using .SignalCtx
 using .GridCtx
+using .FundCtx
 # `construct` is the package-owned constructor protocol for decoded JSON objects
 # (the JSON.jl 1.0 replacement for `StructTypes.construct`). Reachable as
 # `LongBridge.construct`, but deliberately not exported: the name is too generic.
@@ -306,9 +310,92 @@ export USRankTag,
     GetAllExecutionsOptions,
     AllExecutionsResponse
 
+# --- Fund (基金业务) ---
+export FundContext,
+    hot_funds,
+    funds,
+    fund_filters,
+    fund_detail,
+    fund_analysis,
+    fund_analysis_detail,
+    fund_trend,
+    fund_annual_returns,
+    fund_quarterly_returns,
+    fund_performance,
+    fund_performance_comparison,
+    fund_nav,
+    fund_nav_history,
+    fund_nav_range,
+    fund_holdings,
+    fund_stock_holdings,
+    fund_position,
+    fund_position_performance,
+    fund_position_profits,
+    fund_position_nav,
+    fund_position_dividends,
+    fund_orders,
+    fund_order,
+    fund_transactions,
+    fund_validate_order,
+    fund_submit_order,
+    fund_cancel_order
+export FundNavValue,
+    FundPerformancePoint,
+    HotFund,
+    FundBrief,
+    FundFilters,
+    FundAssetAllocationItem,
+    FundAssetAllocation,
+    FundDetail,
+    FundAnalysis,
+    FundAnalysisDetail,
+    FundTrendContrast,
+    FundTrend,
+    FundNamedContrast,
+    FundPerformanceComparison,
+    FundAnnualReturn,
+    FundQuarterlyReturn,
+    FundPerformance,
+    FundHolding,
+    FundHoldings,
+    FundStockHolding,
+    FundHoldingPosition,
+    FundPositions,
+    FundDatedValue,
+    FundUnitValue,
+    FundPositionDetailValues,
+    FundPositionDetail,
+    FundPositionPerformance,
+    FundPositionProfits,
+    FundPositionNav,
+    FundDividend,
+    FundDividends,
+    FundOrder,
+    FundOrderKeyword,
+    FundOrderStage,
+    FundOrderInfo,
+    FundOrderDetail,
+    FundTransaction,
+    FundOrderValidation,
+    FundOrderSubmitResponse,
+    GetFundsOptions,
+    GetFundAnalysisOptions,
+    FundPageOptions,
+    FundNavRangeOptions,
+    GetFundHoldingsOptions,
+    GetFundStockHoldingsOptions,
+    FundPositionsOptions,
+    GetFundPositionOptions,
+    GetFundPositionProfitsOptions,
+    GetFundPositionDividendsOptions,
+    GetFundOrdersOptions,
+    GetFundTransactionsOptions,
+    ValidateFundOrderOptions,
+    SubmitFundOrderOptions
+
 # --- Calendar (财务日历) ---
 export CalendarContext, finance_calendar
-export CalendarCategory
+export CalendarCategory, CalendarPageDirection
 export CalendarDataKv, CalendarEventInfo, CalendarDateGroup, CalendarEventsResponse
 
 # --- Portfolio (组合分析) ---

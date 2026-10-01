@@ -6,67 +6,19 @@
 ## 更新日志
 详细更新说明请见 [NEWS.md](NEWS.md)。
 
-最新版本：**v0.10.0** —— 跟进上游 openapi v4.2.1→v5.1.0：新增 Signal / Grid 两个 Context、多腿期权订单、期权链迁移到 HTTP 端点。含破坏性变更。
+最新版本：**v0.11.0** —— 同步上游 openapi v5.2.0：新增 28 个基金接口、财经日历分页控制，并更新基金持仓标识字段。
 
-### v0.10.0 迁移说明
+### v0.11.0 迁移说明
 
-- **期权链（破坏性）：** `option_chain_info_by_date(ctx, symbol, expiry_date; standard_only=false)` 改走 HTTP 端点，返回 `Vector{OptionChainContract}`（每合约一条）。请按 `direction`（`OptionDirection.Call`/`Put`）过滤，不再读旧的配对字段 `call_symbol`/`put_symbol`。新增枚举 `OptionDirection`、`OptionExpiryCycleType`、`OptionStandardAttr`；取消客户端缓存。`option_chain_expiry_date_list` 不变。
-- **`history_executions`（破坏性）：** 返回 `Vector{Execution}` 并自动翻页取全部结果，不再是单页 `ExecutionResponse`。
-- **`Execution`（破坏性）：** 新增 `side::OrderSide.T` 字段。
-- **`all_executions` 重新启用：** `all_executions(ctx; symbol, order_id, start_at, end_at, page)` → `GET /v3/trade/execution/all`。
-- **多腿期权订单：** `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`，支持垂直/日历价差、跨式、勒式、领口等；`Order`/`OrderDetail` 新增 `multi_leg` 字段。
-- **新增 `SignalContext`：** `signals`、`signal`、`security_facts`。
-- **新增 `GridContext`：** `grid_submit`/`grid_replace`/`grid_list`/`grid_list_by_ids`/`grid_detail`/`grid_trigger_history`/`grid_cancel`/`grid_suspend`/`grid_restart`/`grid_symbol_info`。
-- **`valuation_comparison`：** 改为直接发送 `symbol` + `comparison_symbols`（公开签名不变）。
-
-### v0.9.6 迁移说明
-
-- REST 请求在原有 connect / 读写空转超时之外，新增 60 秒的整体 `request_timeout`；服务端“持续滘流但不空转”的响应不再能无限期占住 Context 的工作任务。
-- `429 Too Many Requests` 对所有方法（包括下单）都会重试，与上游 Rust SDK 一致：网关在限流时并未执行请求，重发没有副作用。传输层错误仍然不会重发非幂等请求。
-- 请求通过 `User-Agent` 自标识为 `openapi-sdk LongBridge.jl/<版本>`。
-- WebSocket 握手复用进程级 `HTTP.Client`，共享其 transport、DNS 缓存与 TLS 配置。
-- OAuth 回调服务器由 `0.0.0.0` 改为只监听 `127.0.0.1`。如果你之前依赖从其他主机访问它，请改用端口转发到回环地址。
-- 内部 API 变更：`LongBridge.Client.sign` 的第三个参数由 header `Dict` 改为请求时间戳。
-
-### v0.9.5 迁移说明
-
-- SDK 依赖由 `JSON3` + `StructTypes` 换成 `JSON`（1.0+）。未类型化响应解析为 `JSON.Object{String,Any}`（仍支持 `obj.field`、`obj[:field]`、`get(obj, :field, default)`），JSON 数组解析为 `Vector{Any}`（原 `JSON3.Array`）。
-- 手写的响应构造器从 `StructTypes.construct(T, obj)` 迁移到 `LongBridge.Utils.construct(T, obj)`（也可用 `LongBridge.construct` 访问）；`Utils.JSONObject` 是解析后 JSON 对象的类型别名。
-- `Utils.json3_to_mutable` 更名为 `Utils.json_to_mutable`。
-
-### v0.9.3 迁移说明
-
-- `disconnect!(ctx)` 和 `close(ctx)` 现在幂等并执行确定性清理：返回前会关闭 command/push 通道、唤醒挂起的请求并停止重连工作。仍建议显式调用 `close(ctx)` 来释放连接；Context 被回收时会进行尽力而为的自动清理。
-- REST、OAuth 和遗留 token 刷新请求现在共享一个进程内 `HTTP.Client`，因此连接池与传输状态会被复用。OAuth token 交换仍保留原有 60 秒请求 / 10 秒响应头 / 30 秒读空闲超时。
-
-### v0.9.2 迁移说明
-
-- `subscribe_limit(ctx)` 和 `history_candlestick_limit(ctx)` 暴露 `QueryUserQuoteProfile` 返回的账户限制；profile 加载完成前返回 `nothing`。
-- 为兼容现有代码，历史 K 线 `timestamp` 仍是不带时区但具有 UTC 语义的 `DateTime`。设置 `include_timestamp_unix=true` 可保留原始 Unix 秒数；用 `utc_iso8601` 输出明确的 `Z`，或安装 `TimeZones.jl` 后调用 `to_market_time` 转换为市场本地时间。
-- SDK 不会补齐或合成缺失 K 线，仍保留上游原始响应。
-- OAuth 配置现在能够正确读取 access token 并选择 API 数据中心，不再触发 `oauth_access_token` 未定义错误。
-
-### v0.9.1 迁移说明
-
-- 上游接口恢复前，`all_executions` 暂时不可用。`GetAllExecutionsOptions` 和 `AllExecutionsResponse` 类型仍保留，后续接口恢复后可重新启用；当前请使用 `today_executions` 或 `history_executions`。
-- 中间代理返回非 OpenAPI 标准错误页时，会抛出 `UnexpectedHttpResponse`，并保留状态码、trace ID、响应头和原始 body，便于定位问题：
-
-  ```julia
-  try
-      response = today_executions(ctx)
-  catch err
-      if err isa UnexpectedHttpResponse
-          @error "上游返回非标准响应" status=err.status trace_id=err.trace_id body=err.body
-      end
-      rethrow()
-  end
-  ```
+- **基金持仓（破坏性变更）：** `fund_positions(::TradeContext)` 返回项改读 `position.counter_id`，原 `position.symbol` 字段已移除。新值是 `UT/FD/HK0000384492` 这样的完整 ID；用 `last(split(position.counter_id, '/'))` 取得 ISIN。仍兼容读取旧响应的 `symbol` 键，请求的 `symbol` 过滤参数不变。
+- **财经日历：** `finance_calendar(...; count=100, offset=0, next=CalendarPageDirection.Later)` 控制分页，省略时使用服务端默认值。返回非空 `next_date` 时，可用 `Date(page.next_date)` 请求下一页。
+- **基金业务：** 通过 `FundContext(cfg)` 使用新接口。参见下方基金接口说明，以及本地 `quote_test.jl` / `trade_test.jl` 示例。
 
 参考文档：
 
-1. [官方文档](https://open.longportapp.com/zh-CN/docs)
+1. [官方文档](https://open.longbridge.com/docs)
 
-2. [OpenAPI SDK Base](https://github.com/longportapp/openapi)
+2. [OpenAPI SDK Base](https://github.com/longbridge/openapi)
 
 ## 快速开始
 
@@ -371,7 +323,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Trade.subscribe(ctx, topics::Vector{TopicType.T})`: 订阅交易推送（如 `[TopicType.Private]`）
 - `Trade.unsubscribe(ctx, topics::Vector{TopicType.T})`: 取消订阅交易推送
 
-### 基本面（FundamentalContext，v0.6.0 新增）
+### 基本面（FundamentalContext）
 - `FundamentalContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
 - `financial_report(ctx, symbol; kind, period)`: 完整财报（利润表/资产负债表/现金流量表）
 - `institution_rating(ctx, symbol)`: 分析师评级（latest + summary，并行 fan-out）
@@ -391,7 +343,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `buyback(ctx, symbol)`: 回购数据
 - `ratings(ctx, symbol)`: 多维度评级
 
-### 市场数据（MarketContext，v0.6.0 新增）
+### 市场数据（MarketContext）
 - `MarketContext(config)`: 创建上下文
 - `market_status(ctx)`: 各市场开/收市状态；状态字段使用 `MarketTradeStatus`
 - `broker_holding(ctx, symbol, period)`: 净买/净卖前十券商
@@ -403,13 +355,42 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `anomaly(ctx, market)`: 市场异动
 - `constituent(ctx, symbol)`: 指数成份股（symbol 传指数如 `"HSI.HK"`）
 
-### 财务日历（CalendarContext，v0.6.0 新增）
+### 财务日历（CalendarContext）
 - `CalendarContext(config)`: 创建上下文
-- `finance_calendar(ctx, category, start, end_; market)`: 财务日历事件
-  - `CalendarEventsResponse.next_date`: 下一页游标，可作为下一次请求的 `start`，并保持同一个 `end_`
+- `finance_calendar(ctx, category, start, end_; market, count, offset, next)`: 财务日历事件；`count` 指定每页数量，`offset` 跳过事件，`next` 为 `CalendarPageDirection.Later` / `Earlier`
+  - `CalendarEventsResponse.next_date`: 下一页游标，非空时用 `Date(page.next_date)` 作为下一次请求的 `start`，保持同一个 `end_`；游标为空时结束
   - `CalendarCategory`: `Report` / `Dividend` / `Split` / `Ipo` / `MacroData` / `Closed` / `Meeting` / `Merge`
 
-### 组合分析（PortfolioContext，v0.6.0 新增）
+### 基金业务（FundContext，v0.11.0 新增）
+
+创建 `fund_ctx = FundContext(cfg)`，全部 28 个方法均为同步 HTTP 调用。基金标识使用 `funds` / `fund_positions` 返回的完整 `counter_id`，例如 `"UT/FD/HK0000384492"`。
+
+| 类别 | 方法 |
+| --- | --- |
+| 基金目录 | `hot_funds`、`funds`、`fund_filters`、`fund_detail` |
+| 分析比较 | `fund_analysis`、`fund_analysis_detail`、`fund_trend`、`fund_performance_comparison` |
+| 收益表现 | `fund_annual_returns`、`fund_quarterly_returns`、`fund_performance` |
+| 净值与配置 | `fund_nav`、`fund_nav_history`、`fund_nav_range`、`fund_holdings`、`fund_stock_holdings` |
+| 账户持仓 | `fund_positions`、`fund_position`、`fund_position_performance`、`fund_position_profits`、`fund_position_nav`、`fund_position_dividends` |
+| 订单交易 | `fund_orders`、`fund_order`、`fund_transactions`、`fund_validate_order`、`fund_submit_order`、`fund_cancel_order` |
+
+```julia
+fund_ctx = FundContext(cfg)
+catalog = funds(fund_ctx, GetFundsOptions())
+if !isempty(catalog)
+    counter_id = first(catalog).counter_id
+    nav = fund_nav(fund_ctx, counter_id)  # Vector{FundNavValue}
+    history = fund_nav_history(fund_ctx, counter_id, FundPageOptions(page=1, size=20))
+end
+positions = fund_positions(fund_ctx, FundPositionsOptions())  # FundPositions
+orders = fund_orders(fund_ctx, GetFundOrdersOptions(page=1, size=20))
+```
+
+可选参数通过选项结构体传入，如上例所示。日期范围字段名使用 `end_`，请求时发送为 `end`。金额等数值字符串保留原始精度，时间戳和订单 ID 使用 `Int64`，动态 JSON 字段保留为解析后的对象或数组。`asset_allocation`、`FundTrend.contrast_performances`、`detail_values`、`FundOrderDetail.order` 均可能为 `nothing`。
+
+新基金渠道的持仓项名为 `FundHoldingPosition`，持仓概览选项为 `FundPositionsOptions`，避免与原交易模块类型冲突。原 `fund_positions(::TradeContext; symbol=...)` 保留原端点及过滤条件，返回项仍为 `TradeProtocol.FundPosition`。申购参数示例：`SubmitFundOrderOptions(counter_id=..., action="buy", currency="USD", amount="100.00")`；撤单使用返回的数值订单 ID。`trade_test.jl` 中的下单示例默认注释。
+
+### 组合分析（PortfolioContext）
 - `PortfolioContext(config)`: 创建上下文
 - `exchange_rate(ctx)`: 全部支持币种的汇率
 - `profit_analysis(ctx; start, end_)`: 账户总盈亏（summary + sublist 并行 fan-out）
@@ -417,7 +398,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `profit_analysis_detail(ctx, symbol; start, end_)`: 单只证券盈亏明细
 - `profit_analysis_flows(ctx, symbol; page, size, derivative, ...)`: 单只证券交易流水
 
-### 价格提醒（AlertContext，v0.6.0 新增）
+### 价格提醒（AlertContext）
 - `AlertContext(config)`: 创建上下文
 - `list_alerts(ctx)`: 查询全部提醒（按证券分组）
 - `add_alert(ctx, symbol, condition, trigger_value, frequency)`: 新增提醒
@@ -426,7 +407,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `update_alert(ctx, item::AlertItem)`: 更新提醒
 - `delete_alerts(ctx, ids::Vector{String})`: 删除提醒
 
-### 社区自选股（SharelistContext，v0.6.0 新增）
+### 社区自选股（SharelistContext）
 - `SharelistContext(config)`: 创建上下文
 - `list_sharelists(ctx; count)`: 我自己 + 已订阅的自选股列表
 - `popular_sharelists(ctx; count)`: 热门列表
@@ -437,7 +418,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `remove_sharelist_securities(ctx, id, symbols)`: 移除证券
 - `sort_sharelist_securities(ctx, id, symbols)`: 重排证券
 
-### 定投计划（DCAContext，v0.6.0 新增）
+### 定投计划（DCAContext）
 - `DCAContext(config)`: 创建上下文
 - `list_dca(ctx; status, symbol)`: 全部定投计划，可按状态/标的过滤
 - `create_dca(ctx, symbol, amount, frequency; day_of_week, day_of_month, allow_margin)`: 新建
@@ -451,7 +432,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `dca_calc_date(ctx, symbol, frequency; day_of_week, day_of_month)`: 计算下次交易日
 - `dca_set_reminder(ctx, hours)`: 设置执行前提醒小时数（`"1"`/`"6"`/`"12"`）
 
-### 社区话题与资讯（ContentContext，v0.6.0 新增）
+### 社区话题与资讯（ContentContext）
 - `ContentContext(config)`: 创建上下文
 - `news(ctx, symbol)`: 某证券的资讯列表
 - `topics_by_symbol(ctx, symbol)`: 某证券下的话题
@@ -461,17 +442,16 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `create_topic(ctx, title, body; topic_type, tickers, hashtags)`: 发布新话题，返回 ID
 - `create_topic_reply(ctx, topic_id, body; reply_to_id)`: 评论（plain text，提到的 symbol 自动识别）
 
-### 行情（QuoteContext，v0.6.0 新增 4 个方法）
-- `short_positions(ctx, symbol)`: 美股做空数据（FINRA 双月公布）
+### 期权成交量与自选置顶（QuoteContext）
 - `option_volume(ctx, symbol)`: 实时期权认购/认沽成交量
 - `option_volume_daily(ctx, symbol, timestamp, count)`: 历史日度期权统计
 - `update_pinned(ctx, mode::PinnedMode.T, symbols)`: 自选股置顶/取消置顶
 
-### 行情（QuoteContext，v0.7.0 新增）
-- `quote_snapshot(ctx, symbols)`: 一次性服务器行情查询（即 v0.6.x 的 `realtime_quote` 行为）
+### 行情快照与账户信息（QuoteContext）
+- `quote_snapshot(ctx, symbols)`: 一次性服务器行情查询
 - `realtime_quote(ctx, symbol_or_symbols)`: 从本地缓存读取最新推送的行情（需先 `subscribe`），与 `realtime_depth/brokers/trades` 语义一致
 - `filings(ctx, symbol)`: 公司公告列表（REST `/v1/quote/filings`），返回 `Vector{FilingItem}`
-- `member_id(ctx)` / `quote_level(ctx)` / `quote_package_details(ctx)`: 连接后通过 `QueryUserQuoteProfile` 拉取的真实值（v0.6.x 是零值桩）
+- `member_id(ctx)` / `quote_level(ctx)` / `quote_package_details(ctx)`: 连接后通过 `QueryUserQuoteProfile` 拉取的真实值
 - `subscribe_limit(ctx)` / `history_candlestick_limit(ctx)`: `QueryUserQuoteProfile` 返回的账户限制；profile 尚未加载时返回 `nothing`
 
 历史 K 线的 `timestamp` 是不带时区的 `DateTime`，但其语义为 UTC。可用
@@ -479,12 +459,12 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 `to_market_time(timestamp, "America/New_York")` 转换为交易所本地时间。
 设置 `include_timestamp_unix=true` 会增加原始 Unix 秒数列 `timestamp_unix`，默认列结构不变。
 
-### 账户结算单（AssetContext，v0.7.0 新增）
+### 账户结算单（AssetContext）
 - `AssetContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
 - `statements(ctx, type::StatementType.T; page, page_size)`: 结算单分页列表（`type` 为 `Daily` / `Monthly`）
 - `statement_download_url(ctx, file_key)`: 用 `file_key` 换取结算单下载链接
 
-### 选股器（ScreenerContext，v0.8.0 新增；v0.8.1 签名更新）
+### 选股器（ScreenerContext）
 - `ScreenerContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
 - `screener_recommend_strategies(ctx, market)`: 指定市场（如 `"US"` / `"HK"`）的推荐内置策略
 - `screener_user_strategies(ctx, market)`: 指定市场已保存的策略列表
@@ -493,7 +473,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
   Mode A（给 `strategy_id`，内部先拉策略再 POST）或 Mode B（用 `ScreenerCondition` 类型化条件）。`DEFAULT_RETURNS` 始终包含；响应中 `items[].indicators[].key` 的 `filter_` 前缀自动剥离。
 - `screener_indicators(ctx)`: 可用指标元数据；`filter_` 前缀剥离 + 由 `tech_indicators` 重组 `tech_values`
 
-### 基本面（FundamentalContext，v0.8.0 新增）
+### 基本面（FundamentalContext）
 - `business_segments(ctx, symbol)`: 最新业务分部收入构成
 - `business_segments_history(ctx, symbol; report, cate)`: 历史业务 + 地区分部
 - `institution_rating_views(ctx, symbol)`: 机构评级分布的历史时间序列
@@ -503,30 +483,30 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `shareholder_top(ctx, symbol)`: 主要股东排行（原始 JSON）
 - `shareholder_detail(ctx, symbol, object_id)`: 指定股东对象的持仓明细（原始 JSON）
 - `valuation_comparison(ctx, symbol, currency; comparison_symbols)`: 估值对比（PE/PB/PS 含历史曲线）
-- `etf_asset_allocation(ctx, symbol)`: ETF 资产配置（holdings / regional / asset class / industry 分组，v0.8.3 新增）
-- `macroeconomic_indicators(ctx; country, keyword, offset, limit)`: 宏观经济指标列表，可按 `MacroeconomicCountry` 和关键字模糊过滤（v0.8.5 新增）
-- `macroeconomic(ctx, id; start_date, end_date, offset, limit, sort)`: 指定宏观指标的历史数据，默认最新数据在前（v0.8.5 新增）
+- `etf_asset_allocation(ctx, symbol)`: ETF 资产配置（holdings / regional / asset class / industry 分组）
+- `macroeconomic_indicators(ctx; country, keyword, offset, limit)`: 宏观经济指标列表，可按 `MacroeconomicCountry` 和关键字模糊过滤
+- `macroeconomic(ctx, id; start_date, end_date, offset, limit, sort)`: 指定宏观指标的历史数据，默认最新数据在前
 
-### 市场数据（MarketContext，v0.8.0 新增）
-- `top_movers(ctx, markets, sort, limit; date)`: 异动榜（对应上游重命名后的 `stock_events`）
+### 市场数据（MarketContext）
+- `top_movers(ctx, markets, sort, limit; date)`: 异动榜
 - `rank_categories(ctx)`: 可用的排行榜分类（原始 JSON）
 - `rank_list(ctx, key; need_article)`: 指定分类的排行榜列表
 
-### 行情（QuoteContext，v0.8.0 破坏性变更 + 新增）
-- `short_positions(ctx, symbol; count=20)`：**破坏性** —— HK/US 统一端点（原 US 专用），`ShortPosition` → `ShortPositionsItem` 并新增 HK 字段；响应去掉 `symbol`/`sources` 外层字段；`timestamp` 由 `String` 改为 `DateTime` (UTC)。
+### 行情（QuoteContext）
+- `short_positions(ctx, symbol; count=20)`：HK/US 做空持仓数据，条目类型为 `ShortPositionsItem`，时间戳使用 UTC 语义的 `DateTime`。
 - `short_trades(ctx, symbol; count=20)`：HK/US 做空成交记录，按 `.HK` 后缀自动选择端点。
 
-### 策略信号（SignalContext，v0.10.0 新增）
+### 策略信号（SignalContext）
 - `SignalContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
 - `signals(ctx, ::SignalsOptions)`: 按标的/策略/催化剂/时间过滤查询信号，`limit`/`offset` 分页
 - `signal(ctx, signal_id)`: 单条信号，含 `json_data` 完整分析
 - `security_facts(ctx, ::SecurityFactsOptions)`: 某标的的催化剂事实事件（异常检测、因子读数、来源、文本摘要）
 
-### 网格交易（GridContext，v0.10.0 新增）
+### 网格交易（GridContext）
 - `GridContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
 - `grid_submit(ctx, ::SubmitGridOrderOptions)`: 提交网格订单
 - `grid_replace(ctx, ::ReplaceGridOrderOptions)`: 修改网格订单
-- `grid_list(ctx; page, limit, market, status, symbol, sort_by, sort_order)`: 网格订单列表
+- `grid_list(ctx, GetGridOrdersOptions(; page, limit, market, status, symbol, sort_by, sort_order))`: 网格订单列表
 - `grid_list_by_ids(ctx, ::GetGridOrdersByIdsOptions)`: 按 ID 查询网格订单
 - `grid_detail(ctx, ::GetGridOrderDetailOptions)`: 网格订单详情
 - `grid_trigger_history(ctx, ::GetGridTriggerHistoryOptions)`: 网格触发历史

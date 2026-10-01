@@ -49,6 +49,9 @@ include("test_v0_9_4_release.jl")
 # v0.10.0 / 上游 v4.2.1→v5.1.0（期权链 HTTP / 多腿订单 / SignalContext / GridContext）
 include("test_v0_10_0_sync.jl")
 
+# v0.11.0 / upstream v5.2.0 (FundContext, calendar pagination, fund counter IDs)
+include("test_v0_11_0_sync.jl")
+
 # JSON3.jl -> JSON.jl 1.0 迁移：解析/构造行为回归
 include("test_json_migration.jl")
 

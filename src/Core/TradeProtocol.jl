@@ -8,6 +8,7 @@ using ProtoBuf: OneOf
 using EnumX
 using Dates
 using JSON
+using JSON.StructUtils: @nonstruct
 using Printf
 using ..QuoteProtocol: SecurityBoard
 using ..Constant
@@ -1054,10 +1055,11 @@ function Base.show(io::IO, ::MIME"text/plain", flows::Vector{CashFlow})
 end
 
 """
-Fund position
+Fund position. `counter_id` is the full fund identifier (e.g. `UT/FD/HK0000384492`).
+Legacy responses using the `symbol` key are still accepted without rewriting its value.
 """
-struct FundPosition
-    symbol::String
+@nonstruct struct FundPosition
+    counter_id::String
     symbol_name::String
     currency::String
     holding_units::String
@@ -1066,10 +1068,26 @@ struct FundPosition
     net_asset_value_day::String
 end
 
+function JSON.lift(::Type{FundPosition}, obj::AbstractDict)
+    FundPosition(
+        String(haskey(obj, "counter_id") ? obj["counter_id"] : obj["symbol"]),
+        String(obj["symbol_name"]),
+        String(obj["currency"]),
+        String(obj["holding_units"]),
+        String(obj["current_net_asset_value"]),
+        String(obj["cost_net_asset_value"]),
+        String(obj["net_asset_value_day"]),
+    )
+end
+
+JSON.lower(pos::FundPosition) = NamedTuple{fieldnames(FundPosition)}(Tuple(
+    getfield(pos, field) for field in fieldnames(FundPosition)
+))
+
 function Base.show(io::IO, pos::FundPosition)
     print(
         io,
-        pos.symbol,
+        pos.counter_id,
         isempty(pos.symbol_name) ? "" : " ($(pos.symbol_name))",
         ": ",
         pos.holding_units,

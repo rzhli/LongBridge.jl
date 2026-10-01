@@ -6,67 +6,19 @@ This is an unofficial SDK, currently for personal use only. Some functions in th
 ## Release Notes
 See [NEWS.md](NEWS.md) for detailed release notes.
 
-Latest release: **v0.10.0** — sync with upstream openapi v4.2.1→v5.1.0: Signal & Grid Contexts, multi-leg option orders, option chain moved to HTTP. Contains breaking changes.
+Latest release: **v0.11.0** — sync with upstream openapi v5.2.0: 28 fund APIs, calendar pagination, and the fund holding identifier migration.
 
-### v0.10.0 migration notes
+### v0.11.0 migration notes
 
-- **Option chain (breaking):** `option_chain_info_by_date(ctx, symbol, expiry_date; standard_only=false)` now returns `Vector{OptionChainContract}` (one entry per contract) from the HTTP endpoint. Filter on `direction` (`OptionDirection.Call`/`Put`) instead of reading the old paired `call_symbol`/`put_symbol`. New enums `OptionDirection`, `OptionExpiryCycleType`, `OptionStandardAttr`; the client-side cache is gone. `option_chain_expiry_date_list` is unchanged.
-- **`history_executions` (breaking):** returns `Vector{Execution}` and auto-pages through all results, instead of a single `ExecutionResponse` page.
-- **`Execution` (breaking):** gained a `side::OrderSide.T` field.
-- **`all_executions` re-enabled:** `all_executions(ctx; symbol, order_id, start_at, end_at, page)` → `GET /v3/trade/execution/all`.
-- **Multi-leg orders:** `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)` for vertical/calendar spreads, straddles, strangles, collars. `Order`/`OrderDetail` now expose `multi_leg`.
-- **New `SignalContext`:** `signals`, `signal`, `security_facts`.
-- **New `GridContext`:** `grid_submit`/`grid_replace`/`grid_list`/`grid_list_by_ids`/`grid_detail`/`grid_trigger_history`/`grid_cancel`/`grid_suspend`/`grid_restart`/`grid_symbol_info`.
-- **`valuation_comparison`:** now sends `symbol` + `comparison_symbols` directly (public signature unchanged).
-
-### v0.9.6 migration notes
-
-- REST requests now carry an overall 60-second `request_timeout` on top of the existing connect / read-idle / write-idle timeouts, so a stalled-but-not-idle response can no longer block a Context worker indefinitely.
-- `429 Too Many Requests` is retried for every method (matching the upstream Rust SDK), including order submission, because the gateway rejects rate-limited requests without executing them. Transport failures still never resend a non-idempotent request.
-- Requests identify themselves as `openapi-sdk LongBridge.jl/<version>` via `User-Agent`.
-- WebSocket handshakes reuse the process-wide `HTTP.Client`, sharing its transport, DNS cache, and TLS configuration.
-- The OAuth callback server binds to `127.0.0.1` instead of `0.0.0.0`. If you relied on reaching it from another host, forward the port to loopback instead.
-- Internal API change: `LongBridge.Client.sign` takes the request timestamp as its third argument instead of a header `Dict`.
-
-### v0.9.5 migration notes
-
-- The SDK now depends on `JSON` (1.0+) instead of `JSON3` + `StructTypes`. Untyped responses decode to `JSON.Object{String,Any}` (which still supports `obj.field`, `obj[:field]` and `get(obj, :field, default)`) and JSON arrays decode to `Vector{Any}` instead of `JSON3.Array`.
-- Hand-written response constructors moved from `StructTypes.construct(T, obj)` to `LongBridge.Utils.construct(T, obj)` (also reachable as `LongBridge.construct`); `Utils.JSONObject` is the decoded-object type alias.
-- `Utils.json3_to_mutable` was renamed to `Utils.json_to_mutable`.
-
-### v0.9.3 migration notes
-
-- `disconnect!(ctx)` and `close(ctx)` are now idempotent and perform deterministic teardown: they close the command/push channels, wake pending requests, and stop reconnect work before returning. Calling `close(ctx)` explicitly remains the recommended way to release connections. Dropping a Context now triggers best-effort automatic cleanup.
-- REST, OAuth, and legacy token-refresh requests share one process-wide `HTTP.Client`, so connection pooling and transport state are now shared. OAuth token exchanges keep their existing 60-second request / 10-second response-header / 30-second read-idle timeouts.
-
-### v0.9.2 migration notes
-
-- `subscribe_limit(ctx)` and `history_candlestick_limit(ctx)` expose the account limits reported by `QueryUserQuoteProfile`; they return `nothing` until the profile is loaded.
-- Historical candlestick `timestamp` values remain timezone-naive `DateTime`s with UTC semantics for compatibility. Pass `include_timestamp_unix=true` to retain the exact Unix seconds, use `utc_iso8601` for an explicit `Z`, or install `TimeZones.jl` and call `to_market_time` for a market-local value.
-- The SDK does not fill or synthesize missing candles; the upstream response is preserved as returned.
-- OAuth-backed configurations now resolve the access token correctly when selecting the API data-center region.
-
-### v0.9.1 migration notes
-
-- `all_executions` is temporarily unavailable while the upstream endpoint is being restored. `GetAllExecutionsOptions` and `AllExecutionsResponse` remain defined for a future re-enable; use `today_executions` or `history_executions` in the meantime.
-- Non-OpenAPI HTTP error pages are reported as `UnexpectedHttpResponse`, preserving the status, trace ID, headers, and raw body for diagnosis:
-
-  ```julia
-  try
-      response = today_executions(ctx)
-  catch err
-      if err isa UnexpectedHttpResponse
-          @error "unexpected upstream response" status=err.status trace_id=err.trace_id body=err.body
-      end
-      rethrow()
-  end
-  ```
+- **Fund holdings (breaking):** read `position.counter_id` instead of `position.symbol` from `fund_positions(::TradeContext)`. The new value is a full ID such as `UT/FD/HK0000384492`; the ISIN is `last(split(position.counter_id, '/'))`. Legacy `symbol` responses still parse, and the request's `symbol` filter is unchanged.
+- **Calendar:** `finance_calendar(...; count=100, offset=0, next=CalendarPageDirection.Later)` controls pagination. Omit these keywords for server defaults. Convert a nonempty `next_date` with `Date(page.next_date)` when requesting the next page.
+- **Funds:** create `FundContext(cfg)` for the new fund channel. See the mutual-fund API section below and the local `quote_test.jl` / `trade_test.jl` examples.
 
 References:
 
-1. [Official Documentation](https://open.longportapp.com/en/docs)
+1. [Official Documentation](https://open.longbridge.com/docs)
 
-2. [OpenAPI SDK Base](https://github.com/longportapp/openapi)
+2. [OpenAPI SDK Base](https://github.com/longbridge/openapi)
 
 ## Quick Start
 
@@ -373,7 +325,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Trade.subscribe(ctx, topics::Vector{TopicType.T})`: Subscribe to trade pushes (e.g. `[TopicType.Private]`)
 - `Trade.unsubscribe(ctx, topics::Vector{TopicType.T})`: Unsubscribe from trade pushes
 
-### Fundamental Data (`FundamentalContext`, new in v0.6.0)
+### Fundamental Data (`FundamentalContext`)
 - `FundamentalContext(config)`: Create context (HTTP-only, no disconnect needed)
 - `financial_report(ctx, symbol; kind, period)`: Full financial statements (IS/BS/CF/All)
 - `institution_rating(ctx, symbol)`: Analyst ratings (latest + summary, parallel fan-out)
@@ -387,7 +339,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `corp_action(ctx, symbol)`: Corporate actions (dividends, splits, buybacks)
 - `invest_relation(ctx, symbol)`, `operating(ctx, symbol)`, `buyback(ctx, symbol)`, `ratings(ctx, symbol)`
 
-### Market Data (`MarketContext`, new in v0.6.0)
+### Market Data (`MarketContext`)
 - `market_status(ctx)`: Market open/close status across regions; status fields use `MarketTradeStatus`
 - `broker_holding(ctx, symbol, period)` / `broker_holding_detail(ctx, symbol)` / `broker_holding_daily(ctx, symbol, broker_id)`
 - `ah_premium(ctx, symbol, period, count)` / `ah_premium_intraday(ctx, symbol)`: A/H premium klines & intraday
@@ -395,19 +347,48 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `anomaly(ctx, market)`: Market anomaly events
 - `constituent(ctx, symbol)`: Index constituents (e.g. `"HSI.HK"`)
 
-### Calendar (`CalendarContext`, new in v0.6.0)
-- `finance_calendar(ctx, category, start, end_; market)`: Financial calendar events
-  - `CalendarEventsResponse.next_date`: pass as the next `start` with the same `end_` to fetch the next page
+### Calendar (`CalendarContext`)
+- `finance_calendar(ctx, category, start, end_; market, count, offset, next)`: Financial calendar events; `count` sets the page size, `offset` skips events, and `next` is `CalendarPageDirection.Later` / `Earlier`
+  - `CalendarEventsResponse.next_date`: pass `Date(page.next_date)` as the next `start` with the same `end_`; stop when the cursor is empty
   - `CalendarCategory`: `Report` / `Dividend` / `Split` / `Ipo` / `MacroData` / `Closed` / `Meeting` / `Merge`
 
-### Portfolio Analytics (`PortfolioContext`, new in v0.6.0)
+### Mutual Funds (`FundContext`, new in v0.11.0)
+
+Create `fund_ctx = FundContext(cfg)`. All 28 methods are synchronous HTTP calls. Pass a full `counter_id` from `funds` or `fund_positions`, e.g. `"UT/FD/HK0000384492"`.
+
+| Area | Methods |
+| --- | --- |
+| Catalog | `hot_funds`, `funds`, `fund_filters`, `fund_detail` |
+| Analysis | `fund_analysis`, `fund_analysis_detail`, `fund_trend`, `fund_performance_comparison` |
+| Returns | `fund_annual_returns`, `fund_quarterly_returns`, `fund_performance` |
+| NAV and holdings | `fund_nav`, `fund_nav_history`, `fund_nav_range`, `fund_holdings`, `fund_stock_holdings` |
+| Account positions | `fund_positions`, `fund_position`, `fund_position_performance`, `fund_position_profits`, `fund_position_nav`, `fund_position_dividends` |
+| Orders | `fund_orders`, `fund_order`, `fund_transactions`, `fund_validate_order`, `fund_submit_order`, `fund_cancel_order` |
+
+```julia
+fund_ctx = FundContext(cfg)
+catalog = funds(fund_ctx, GetFundsOptions())
+if !isempty(catalog)
+    counter_id = first(catalog).counter_id
+    nav = fund_nav(fund_ctx, counter_id)  # Vector{FundNavValue}
+    history = fund_nav_history(fund_ctx, counter_id, FundPageOptions(page=1, size=20))
+end
+positions = fund_positions(fund_ctx, FundPositionsOptions())  # FundPositions
+orders = fund_orders(fund_ctx, GetFundOrdersOptions(page=1, size=20))
+```
+
+Optional settings use positional keyword-constructed option structs, as in the examples. Date-range option fields use `end_` (sent as `end`). Monetary values remain strings; timestamps and order IDs are `Int64`. Dynamic JSON fields remain decoded objects/arrays. `asset_allocation`, `contrast_performances` on `FundTrend`, `detail_values`, and `order` on `FundOrderDetail` may be `nothing`.
+
+The fund-channel holding type is `FundHoldingPosition` and its overview options are `FundPositionsOptions`. The existing trade holding remains `TradeProtocol.FundPosition`; `fund_positions(::TradeContext; symbol=...)` still uses its existing endpoint and filter. Submission requires `SubmitFundOrderOptions(counter_id=..., action="buy", currency="USD", amount="100.00")`; cancellation takes the returned numeric order ID. Commented order examples are in `trade_test.jl`.
+
+### Portfolio Analytics (`PortfolioContext`)
 - `exchange_rate(ctx)`: Current rates for all supported currencies
 - `profit_analysis(ctx; start, end_)`: Account P&L (summary + sublist parallel fan-out)
 - `profit_analysis_by_market(ctx; page, size, market, ...)`: Paginated by market
 - `profit_analysis_detail(ctx, symbol; ...)`: Per-security P&L breakdown
 - `profit_analysis_flows(ctx, symbol; page, size, derivative, ...)`: Per-security flows
 
-### Price Alerts (`AlertContext`, new in v0.6.0)
+### Price Alerts (`AlertContext`)
 - `list_alerts(ctx)`: List all alerts grouped by security
 - `add_alert(ctx, symbol, condition, trigger_value, frequency)`: Add alert
   - `AlertCondition`: `PriceRise` / `PriceFall` / `PercentRise` / `PercentFall`
@@ -415,12 +396,12 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `update_alert(ctx, item::AlertItem)`: Update alert (toggle enabled etc.)
 - `delete_alerts(ctx, ids::Vector{String})`: Delete alerts
 
-### Community Sharelists (`SharelistContext`, new in v0.6.0)
+### Community Sharelists (`SharelistContext`)
 - `list_sharelists(ctx; count)` / `popular_sharelists(ctx; count)` / `sharelist_detail(ctx, id)`
 - `create_sharelist(ctx, name; description)` / `delete_sharelist(ctx, id)`
 - `add_sharelist_securities(ctx, id, symbols)` / `remove_sharelist_securities(ctx, id, symbols)` / `sort_sharelist_securities(ctx, id, symbols)`
 
-### DCA Plans (`DCAContext`, new in v0.6.0)
+### DCA Plans (`DCAContext`)
 - `list_dca(ctx; status, symbol)` / `dca_stats(ctx; symbol)`
 - `create_dca(ctx, symbol, amount, frequency; day_of_week, day_of_month, allow_margin)`
   - `DCAFrequency`: `Daily` / `Weekly` / `Fortnightly` / `Monthly`
@@ -429,23 +410,22 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `pause_dca(ctx, plan_id)` / `resume_dca(ctx, plan_id)` / `stop_dca(ctx, plan_id)`
 - `dca_history(ctx, plan_id; page, limit)` / `dca_check_support(ctx, symbols)` / `dca_calc_date(ctx, symbol, frequency; ...)` / `dca_set_reminder(ctx, hours)`
 
-### Community Content (`ContentContext`, new in v0.6.0)
+### Community Content (`ContentContext`)
 - `news(ctx, symbol)`: News for a security
 - `topics_by_symbol(ctx, symbol)` / `topic_detail(ctx, id)` / `topic_replies(ctx, topic_id; page, size)`
 - `my_topics(ctx; page, size, topic_type)`: List topics you've published
 - `create_topic(ctx, title, body; topic_type, tickers, hashtags)`: Publish a topic, returns ID
 - `create_topic_reply(ctx, topic_id, body; reply_to_id)`: Post a reply (plain text)
 
-### Quote Additions (v0.6.0)
-- `short_positions(ctx, symbol)`: US short interest (FINRA bi-monthly)
+### Option Volume and Pinned Securities (`QuoteContext`)
 - `option_volume(ctx, symbol)` / `option_volume_daily(ctx, symbol, timestamp, count)`: Option volume stats
 - `update_pinned(ctx, mode::PinnedMode.T, symbols)`: Pin/unpin watchlist securities
 
-### Quote Additions (v0.7.0)
-- `quote_snapshot(ctx, symbols)`: One-shot quote snapshot via WebSocket (was previously `realtime_quote`)
+### Quote Snapshots and Profiles (`QuoteContext`)
+- `quote_snapshot(ctx, symbols)`: One-shot quote snapshot via WebSocket
 - `realtime_quote(ctx, symbol_or_symbols)`: Read latest pushed quote from local cache (subscribe first); aligned with `realtime_depth/brokers/trades`
 - `filings(ctx, symbol)`: Company filings list (REST `/v1/quote/filings`), returns `Vector{FilingItem}`
-- `member_id(ctx)` / `quote_level(ctx)` / `quote_package_details(ctx)`: Now backed by a real `QueryUserQuoteProfile` call on connect (previously returned zero-value stubs)
+- `member_id(ctx)` / `quote_level(ctx)` / `quote_package_details(ctx)`: Account profile values retrieved through `QueryUserQuoteProfile` on connect
 - `subscribe_limit(ctx)` / `history_candlestick_limit(ctx)`: Account limits reported by `QueryUserQuoteProfile`; return `nothing` until the profile has loaded
 
 Historical candlestick `timestamp` columns are timezone-naive `DateTime` values
@@ -454,12 +434,12 @@ TimeZones.jl and call `to_market_time(timestamp, "America/New_York")` for a
 market-local representation. `include_timestamp_unix=true` adds the original
 Unix-seconds value as `timestamp_unix` without changing the default columns.
 
-### Account Statements (`AssetContext`, new in v0.7.0)
+### Account Statements (`AssetContext`)
 - `AssetContext(config)`: Create context (HTTP-only, no disconnect needed)
 - `statements(ctx, type::StatementType.T; page, page_size)`: Paginated list of statement records (`type` = `Daily` / `Monthly`)
 - `statement_download_url(ctx, file_key)`: Resolve a statement record's download URL
 
-### Stock Screener (`ScreenerContext`, new in v0.8.0, signature update in v0.8.1)
+### Stock Screener (`ScreenerContext`)
 - `ScreenerContext(config)`: Create context (HTTP-only, no disconnect needed)
 - `screener_recommend_strategies(ctx, market)`: Preset built-in screener strategies for a market (e.g. `"US"`/`"HK"`)
 - `screener_user_strategies(ctx, market)`: Current user's saved screener strategies for a market
@@ -468,7 +448,7 @@ Unix-seconds value as `timestamp_unix` without changing the default columns.
   Mode A (when `strategy_id` is given — fetches strategy and forwards filters) or Mode B (typed `ScreenerCondition` objects). `DEFAULT_RETURNS` always included; `filter_` prefix is stripped from response indicator keys.
 - `screener_indicators(ctx)`: Available indicator definitions; `filter_` prefix stripped + `tech_values` rebuilt from `tech_indicators`
 
-### Fundamental (`FundamentalContext`, new in v0.8.0)
+### Fundamental (`FundamentalContext`)
 - `business_segments(ctx, symbol)`: Latest business segment revenue breakdown
 - `business_segments_history(ctx, symbol; report, cate)`: Historical business + regional segment snapshots
 - `institution_rating_views(ctx, symbol)`: Historical analyst rating distribution time series
@@ -478,30 +458,30 @@ Unix-seconds value as `timestamp_unix` without changing the default columns.
 - `shareholder_top(ctx, symbol)`: Top-shareholder ranking (raw JSON)
 - `shareholder_detail(ctx, symbol, object_id)`: Holding history for one shareholder object (raw JSON)
 - `valuation_comparison(ctx, symbol, currency; comparison_symbols)`: Valuation comparison (PE/PB/PS) with historical curve
-- `etf_asset_allocation(ctx, symbol)`: ETF asset allocation (holdings / regional / asset class / industry groups, new in v0.8.3)
-- `macroeconomic_indicators(ctx; country, keyword, offset, limit)`: List macroeconomic indicators, optional `MacroeconomicCountry` and fuzzy keyword filters (new in v0.8.5)
-- `macroeconomic(ctx, id; start_date, end_date, offset, limit, sort)`: Historical data for one macroeconomic indicator, newest-first by default (new in v0.8.5)
+- `etf_asset_allocation(ctx, symbol)`: ETF asset allocation (holdings / regional / asset class / industry groups)
+- `macroeconomic_indicators(ctx; country, keyword, offset, limit)`: List macroeconomic indicators, optional `MacroeconomicCountry` and fuzzy keyword filters
+- `macroeconomic(ctx, id; start_date, end_date, offset, limit, sort)`: Historical data for one macroeconomic indicator, newest-first by default
 
-### Market (`MarketContext`, new in v0.8.0)
-- `top_movers(ctx, markets, sort, limit; date)`: Top movers across one or more markets (renamed from upstream `stock_events`)
+### Market (`MarketContext`)
+- `top_movers(ctx, markets, sort, limit; date)`: Top movers across one or more markets
 - `rank_categories(ctx)`: Available rank category keys/labels (raw JSON)
 - `rank_list(ctx, key; need_article)`: Ranked securities for one category
 
-### Quote (`QuoteContext`, breaking + new in v0.8.0)
-- `short_positions(ctx, symbol; count=20)`: **Breaking** — unified HK + US short-position endpoint (was US-only with fixed `last_timestamp=0, page_size=100`). The item struct is now `ShortPositionsItem` and the response drops `symbol`/`sources`. Timestamps are `DateTime` (UTC).
+### Quote (`QuoteContext`)
+- `short_positions(ctx, symbol; count=20)`: HK/US short-position data with `ShortPositionsItem` entries and UTC `DateTime` timestamps.
 - `short_trades(ctx, symbol; count=20)`: HK/US short-trade records, endpoint auto-selected by `.HK` suffix.
 
-### Strategy Signals (`SignalContext`, new in v0.10.0)
+### Strategy Signals (`SignalContext`)
 - `SignalContext(config)`: Create context (HTTP-only, no disconnect needed)
 - `signals(ctx, ::SignalsOptions)`: Query signals, filtered by symbol/strategy/catalyst/time, paged with `limit`/`offset`
 - `signal(ctx, signal_id)`: One signal including the full analysis in `json_data`
 - `security_facts(ctx, ::SecurityFactsOptions)`: A security's catalyst-fact events (anomaly detections, factor readings, sources, NL summaries)
 
-### Grid Trading (`GridContext`, new in v0.10.0)
+### Grid Trading (`GridContext`)
 - `GridContext(config)`: Create context (HTTP-only, no disconnect needed)
 - `grid_submit(ctx, ::SubmitGridOrderOptions)`: Submit a grid order
 - `grid_replace(ctx, ::ReplaceGridOrderOptions)`: Modify a grid order
-- `grid_list(ctx; page, limit, market, status, symbol, sort_by, sort_order)`: List grid orders
+- `grid_list(ctx, GetGridOrdersOptions(; page, limit, market, status, symbol, sort_by, sort_order))`: List grid orders
 - `grid_list_by_ids(ctx, ::GetGridOrdersByIdsOptions)`: List grid orders by IDs
 - `grid_detail(ctx, ::GetGridOrderDetailOptions)`: Grid order detail
 - `grid_trigger_history(ctx, ::GetGridTriggerHistoryOptions)`: Grid trigger history
