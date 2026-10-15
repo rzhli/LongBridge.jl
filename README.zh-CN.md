@@ -6,13 +6,21 @@
 ## 更新日志
 详细更新说明请见 [NEWS.md](NEWS.md)。
 
-最新版本：**v0.11.0** —— 同步上游 openapi v5.2.0：新增 28 个基金接口、财经日历分页控制，并更新基金持仓标识字段。
+最新版本：**v0.12.0** —— 同步上游 openapi v5.2.1：时间条件单与 HTTP 行情传输。
 
-### v0.11.0 迁移说明
+### v0.12.0 更新要点
 
-- **基金持仓（破坏性变更）：** `fund_positions(::TradeContext)` 返回项改读 `position.counter_id`，原 `position.symbol` 字段已移除。新值是 `UT/FD/HK0000384492` 这样的完整 ID；用 `last(split(position.counter_id, '/'))` 取得 ISIN。仍兼容读取旧响应的 `symbol` 键，请求的 `symbol` 过滤参数不变。
-- **财经日历：** `finance_calendar(...; count=100, offset=0, next=CalendarPageDirection.Later)` 控制分页，省略时使用服务端默认值。返回非空 `next_date` 时，可用 `Date(page.next_date)` 请求下一页。
-- **基金业务：** 通过 `FundContext(cfg)` 使用新接口。参见下方基金接口说明，以及本地 `quote_test.jl` / `trade_test.jl` 示例。
+- **HTTP 行情拉取：** 使用 `Config.from_oauth(oauth; quote_transport=QuoteTransport.Http)` 或 `Config.Settings(...; quote_transport=QuoteTransport.Http)`。也可在创建配置前设置环境变量 `LONGBRIDGE_QUOTE_TRANSPORT=http`，或在 TOML 中添加 `quote_transport = "http"`。默认仍是 `ws`，显式配置优先于环境变量。仅拉取行情不会建立 WebSocket；订阅和账户行情档位查询按需连接，`realtime_*` 仍读本地推送缓存。HTTP 同样遵守 `enable_overnight=false`（也支持从 TOML 读取），过滤夜盘 K 线后会有限分页补齐。
+- **时间条件单：** 在 `SubmitOrderOptions` / `SubmitMultiLegOrderOptions` 中传入 `delayed_until=now(Dates.UTC)+Hour(1)`。服务端在此之前保持 `OrderStatus.DelayedNotReported`，到时自动提交。时间必须晚于当前时间且不超过 90 天，多腿时间条件单仅支持 LO / MO；与上游一致，由服务端校验这些限制。
+- **改单与回读：** 用 `ReplaceOrderOptions.delayed_until` 修改时间，或 `clear_delayed_until=true` 清除时间条件（同时设置时清除优先）；均不设置则保留原条件。通过 `order_detail(ctx, id).delayed_until` 或订单列表的 `Delayed Until` 列读取。请求的 `DateTime` 使用 **UTC**；回读沿用现有交易时间惯例，使用 **UTC+8**，未设置时为 `nothing`。
+
+HTTP 网关的错误码和数据可能与 WebSocket 不同；传输限制、测试覆盖及历史版本说明见 [NEWS.md](NEWS.md)。
+
+### v0.12.0 迁移说明
+
+- 原有关键字形式的订单选项仍然可用。若使用位置参数构造订单选项、`Order` 或 `OrderDetail`，需补上新增的尾部字段（未设置时用 `nothing` / `false`）。
+- 订单列表 DataFrame 追加 `Delayed Until` 列；状态处理需识别 `DelayedNotReported`。清除时间条件**不是撤单**，恢复普通单后可能立即报送。回读的 UTC+8 时间如需复用于 UTC 请求，应先减去 `Hour(8)`。
+- HTTP.jl 最低版本提升到 **2.8**，仍限定在主版本 2 内。行情默认继续使用 WebSocket；`QuoteTransport` 不影响交易传输。
 
 参考文档：
 
@@ -76,6 +84,8 @@ token_expire_time = "2025-07-22T00:00:00"  # ISO8601格式，UTC时间
 # quote_ws_url = "wss://openapi-quote.longportapp.com"
 # trade_ws_url = "wss://openapi-trade.longportapp.com"
 # enable_papertrading = false
+# quote_transport = "http"  # 可选；默认 "ws"，也可由 LONGBRIDGE_QUOTE_TRANSPORT 指定
+# enable_overnight = false  # 可选；本 Julia SDK 默认 true
 ```
 
 ```julia
@@ -92,12 +102,18 @@ cfg = Config.from_toml()
 
 ### 行情
 
+在 TOML 中设置 `quote_transport = "http"`，或使用
+`Config.from_oauth(oauth; quote_transport=QuoteTransport.Http, enable_overnight=false)`，
+即可通过 HTTP 拉取而不建立 WebSocket。若只想使用 HTTP，请不要调用 `member_id`、
+`quote_level` 等账户行情信息查询：这些查询和订阅会按需连接 WS。
+`realtime_*` 仍读取推送缓存，不会读取 HTTP 快照。
+
 ```julia
 using LongBridge
 
 cfg = Config.from_toml()
 
-# 创建并连接 QuoteContext
+# 创建 QuoteContext（仅默认 WS 传输会立即启动连接）
 ctx = QuoteContext(cfg)
 
 # 获取标的基础信息
@@ -221,6 +237,43 @@ resp = cancel_order(ctx, "709043056541253632")
 disconnect!(ctx)
 ```
 
+### 时间条件单
+
+构造选项不会下单。下面的写操作均已注释；使用前请确认账户、价格、数量与交易时段，
+并在提交前重新计算将来的 UTC 时间。
+
+```julia
+using LongBridge, Dates
+
+options = SubmitOrderOptions(
+    symbol = "700.HK", order_type = OrderType.LO, side = OrderSide.Buy,
+    submitted_quantity = 100, time_in_force = TimeInForceType.Day,
+    submitted_price = 300.0, delayed_until = now(Dates.UTC) + Hour(1),
+)
+# submitted = submit_order(trade_ctx, options)
+
+# 调整时间；请填入真实订单 ID 和该订单的实际数量：
+# replace_order(trade_ctx, ReplaceOrderOptions(
+#     order_id = "<order-id>", submitted_quantity = 100,
+#     delayed_until = now(Dates.UTC) + Hour(2),
+# ))
+# 或清除时间条件（不是撤单，可能立即提交，请勿与上例连续执行）：
+# replace_order(trade_ctx, ReplaceOrderOptions(
+#     order_id = "<order-id>", submitted_quantity = 100, clear_delayed_until = true,
+# ))
+
+# 使用已创建的 TradeContext 只读查询：
+# pending = today_orders(trade_ctx; status = [OrderStatus.DelayedNotReported])
+# pending[:, ["Order ID", "Status", "Delayed Until"]]  # UTC+8，未设置时为 nothing
+# detail = order_detail(trade_ctx, "<order-id>")
+# detail.delayed_until  # UTC+8；复用于 UTC 请求前先减去 Hour(8)
+```
+
+多腿订单需显式导入
+`using LongBridge.TradeProtocol: SubmitMultiLegOrderOptions, SubmitMultiLegOrderLeg, MultiLegStrategy`，
+再在 `SubmitMultiLegOrderOptions` 中传入 `delayed_until`。多腿时间条件单仅支持 `LO` / `MO`；
+请选择有效且未到期的合约。所有时间条件均要求晚于当前时间且不超过 90 天，由服务端校验。
+
 ### 实时行情订阅
 
 ```julia
@@ -245,7 +298,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Config.from_toml()`: 从 `config.toml` 文件加载配置
 - `Config.from_oauth(oauth_handle)`: 从 OAuth 句柄创建配置
 - `OAuthBuilder(client_id) |> build(open_url_fn)`: 构建 OAuth 句柄，通过浏览器进行授权
-- `QuoteContext(config)`: 创建并连接 `QuoteContext`
+- `QuoteContext(config)`: 创建行情上下文；HTTP 拉取无需连接 WS，HTTP 模式下的 WS 专属操作按需建立连接
 - `TradeContext(config)`: 创建并连接 `TradeContext`
 - `disconnect!(ctx)` / `close(ctx)`: 断开连接并停止 Context 的后台任务
 
@@ -311,10 +364,10 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `today_executions(ctx; symbol)`: 获取今日成交
 - `history_executions(ctx; symbol, start_at, end_at)`: 获取全部历史成交（自动翻页，返回 `Vector{Execution}`）
 - `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: 获取所有成交（`AllExecutionsResponse`）
-- `order_detail(ctx, order_id)`: 获取订单详情（组合订单含 `multi_leg`）
-- `submit_order(ctx, ::SubmitOrderOptions)`: 下单
-- `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: 提交多腿期权组合订单
-- `replace_order(ctx, ::ReplaceOrderOptions)`: 修改订单
+- `order_detail(ctx, order_id)`: 获取订单详情（组合订单含 `multi_leg`，时间条件单含可选的 `delayed_until`）
+- `submit_order(ctx, ::SubmitOrderOptions)`: 下单；可选 `delayed_until` 指定服务端自动提交时间
+- `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: 提交多腿期权组合订单；时间条件仅支持 LO / MO
+- `replace_order(ctx, ::ReplaceOrderOptions)`: 修改订单；用 `delayed_until` 调整时间，或 `clear_delayed_until=true` 清除时间条件
 - `cancel_order(ctx, order_id)`: 撤单
 - `estimate_max_purchase_quantity(ctx, ::EstimateMaxPurchaseQuantityOptions)`: 预估最大购买数量
 - `cash_flow(ctx; start_at, end_at)`: 获取资金流水

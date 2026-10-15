@@ -6,13 +6,21 @@ This is an unofficial SDK, currently for personal use only. Some functions in th
 ## Release Notes
 See [NEWS.md](NEWS.md) for detailed release notes.
 
-Latest release: **v0.11.0** — sync with upstream openapi v5.2.0: 28 fund APIs, calendar pagination, and the fund holding identifier migration.
+Latest release: **v0.12.0** — sync with upstream openapi v5.2.1: time-condition orders and HTTP quote transport.
 
-### v0.11.0 migration notes
+### v0.12.0 highlights
 
-- **Fund holdings (breaking):** read `position.counter_id` instead of `position.symbol` from `fund_positions(::TradeContext)`. The new value is a full ID such as `UT/FD/HK0000384492`; the ISIN is `last(split(position.counter_id, '/'))`. Legacy `symbol` responses still parse, and the request's `symbol` filter is unchanged.
-- **Calendar:** `finance_calendar(...; count=100, offset=0, next=CalendarPageDirection.Later)` controls pagination. Omit these keywords for server defaults. Convert a nonempty `next_date` with `Date(page.next_date)` when requesting the next page.
-- **Funds:** create `FundContext(cfg)` for the new fund channel. See the mutual-fund API section below and the local `quote_test.jl` / `trade_test.jl` examples.
+- **HTTP quote pulls:** use `Config.from_oauth(oauth; quote_transport=QuoteTransport.Http)` or `Config.Settings(...; quote_transport=QuoteTransport.Http)`. Alternatively set `LONGBRIDGE_QUOTE_TRANSPORT=http` before constructing the config, or add `quote_transport = "http"` to TOML. The default is `ws`; explicit configuration wins over the environment. Pull-only usage opens no WebSocket; subscriptions and quote-profile queries connect on demand. Realtime getters still read the push cache. `enable_overnight=false` (also read from TOML) applies over HTTP, including bounded K-line refill after filtering overnight bars.
+- **Time-condition orders:** set `delayed_until=now(Dates.UTC)+Hour(1)` in `SubmitOrderOptions` or `SubmitMultiLegOrderOptions`. The server holds the order in `OrderStatus.DelayedNotReported` until then. The time must be in the future and within 90 days; multi-leg time conditions only support LO / MO. Validation is server-side, as upstream.
+- **Replace / readback:** set `ReplaceOrderOptions.delayed_until` to reschedule, or `clear_delayed_until=true` to remove the condition (clear wins if both are set). Omit both to keep it unchanged. Read `order_detail(ctx, id).delayed_until` or the `Delayed Until` order-list column. Request `DateTime`s are **UTC**; readback follows existing trade timestamps (**UTC+8**, `nothing` when unset).
+
+HTTP gateway errors/data can differ from WebSocket results. See [NEWS.md](NEWS.md) for transport caveats, test coverage, and earlier release notes.
+
+### v0.12.0 migration notes
+
+- Existing keyword-based order options remain valid. Positional constructors for order options, `Order`, and `OrderDetail` must include the new trailing fields (`nothing` / `false` when unset).
+- Order-list DataFrames append `Delayed Until`; status handling should recognize `DelayedNotReported`. Clearing a time condition is **not cancellation**: a regular order may be reported immediately. Do not reuse UTC+8 readback dates in UTC requests without subtracting `Hour(8)`.
+- HTTP.jl **2.8 or later within major version 2** is required. The default quote transport remains WebSocket; `QuoteTransport` does not affect trade transport.
 
 References:
 
@@ -76,6 +84,8 @@ token_expire_time = "2025-07-22T00:00:00"  # ISO8601 format, UTC time
 # quote_ws_url = "wss://openapi-quote.longportapp.com"
 # trade_ws_url = "wss://openapi-trade.longportapp.com"
 # enable_papertrading = false
+# quote_transport = "http"  # optional; "ws" by default, or LONGBRIDGE_QUOTE_TRANSPORT
+# enable_overnight = false  # optional; true by default in this Julia SDK
 ```
 
 ```julia
@@ -92,12 +102,19 @@ such as `us_company_overview`, `us_crypto_overview`, `us_query_orders`, and
 
 ### Quotes
 
+Set `quote_transport = "http"` in TOML or use
+`Config.from_oauth(oauth; quote_transport=QuoteTransport.Http, enable_overnight=false)`
+to pull over HTTP without opening a WebSocket. Do not query `member_id`,
+`quote_level`, or other quote-profile fields if you want HTTP-only usage: profile
+queries and subscriptions connect to WS on demand. `realtime_*` still reads the
+push cache, not HTTP snapshots.
+
 ```julia
 using LongBridge
 
 cfg = Config.from_toml()
 
-# Create and connect to QuoteContext
+# Create QuoteContext (connects eagerly only with the default WS transport)
 ctx = QuoteContext(cfg)
 
 # Get basic static information for securities
@@ -223,6 +240,45 @@ resp = cancel_order(ctx, "709043056541253632")
 disconnect!(ctx)
 ```
 
+### Time-condition Orders
+
+Constructing options does not place an order. The write calls below are commented
+out; review the account, price, quantity and trading hours before using them.
+Compute the future UTC time immediately before submitting.
+
+```julia
+using LongBridge, Dates
+
+options = SubmitOrderOptions(
+    symbol = "700.HK", order_type = OrderType.LO, side = OrderSide.Buy,
+    submitted_quantity = 100, time_in_force = TimeInForceType.Day,
+    submitted_price = 300.0, delayed_until = now(Dates.UTC) + Hour(1),
+)
+# submitted = submit_order(trade_ctx, options)
+
+# Reschedule; use the actual order ID and quantity:
+# replace_order(trade_ctx, ReplaceOrderOptions(
+#     order_id = "<order-id>", submitted_quantity = 100,
+#     delayed_until = now(Dates.UTC) + Hour(2),
+# ))
+# OR clear the condition (not a cancellation; may submit immediately):
+# replace_order(trade_ctx, ReplaceOrderOptions(
+#     order_id = "<order-id>", submitted_quantity = 100, clear_delayed_until = true,
+# ))
+
+# Read-only examples with an existing TradeContext:
+# pending = today_orders(trade_ctx; status = [OrderStatus.DelayedNotReported])
+# pending[:, ["Order ID", "Status", "Delayed Until"]]  # UTC+8, nothing when unset
+# detail = order_detail(trade_ctx, "<order-id>")
+# detail.delayed_until  # UTC+8; subtract Hour(8) before reusing in a UTC request
+```
+
+For multi-leg orders, explicitly import
+`using LongBridge.TradeProtocol: SubmitMultiLegOrderOptions, SubmitMultiLegOrderLeg, MultiLegStrategy`
+and pass `delayed_until` in `SubmitMultiLegOrderOptions`. Time conditions support
+only `LO` / `MO` for multi-leg orders. Choose valid, unexpired contracts. All time
+conditions must be later than now and at most 90 days ahead (server validation).
+
 ### Real-time Quote Subscription
 
 ```julia
@@ -247,7 +303,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Config.from_toml()`: Load configuration from `config.toml` file
 - `Config.from_oauth(oauth_handle)`: Create configuration from an OAuth handle
 - `OAuthBuilder(client_id) |> build(open_url_fn)`: Build an OAuth handle with browser-based authorization
-- `QuoteContext(config)`: Create and connect to `QuoteContext`
+- `QuoteContext(config)`: Create a quote context; HTTP pulls are socket-free, while WS-only operations connect on demand in HTTP mode
 - `TradeContext(config)`: Create and connect to `TradeContext`
 - `disconnect!(ctx)` / `close(ctx)`: Disconnect and stop the Context background tasks
 
@@ -313,10 +369,10 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `today_executions(ctx; symbol)`: Get today's executions
 - `history_executions(ctx; symbol, start_at, end_at)`: Get all historical executions (auto-paged, returns `Vector{Execution}`)
 - `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: Get all executions (`AllExecutionsResponse`)
-- `order_detail(ctx, order_id)`: Get order detail (includes `multi_leg` for combination orders)
-- `submit_order(ctx, ::SubmitOrderOptions)`: Submit an order
-- `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: Submit a multi-leg option combination order
-- `replace_order(ctx, ::ReplaceOrderOptions)`: Modify an order
+- `order_detail(ctx, order_id)`: Get order detail (includes `multi_leg` for combination orders and optional `delayed_until`)
+- `submit_order(ctx, ::SubmitOrderOptions)`: Submit an order; optional `delayed_until` schedules server-side submission
+- `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: Submit a multi-leg option combination order; time conditions require LO / MO
+- `replace_order(ctx, ::ReplaceOrderOptions)`: Modify an order; reschedule with `delayed_until` or remove the time condition with `clear_delayed_until=true`
 - `cancel_order(ctx, order_id)`: Cancel an order
 - `estimate_max_purchase_quantity(ctx, ::EstimateMaxPurchaseQuantityOptions)`: Estimate max purchase quantity
 - `cash_flow(ctx; start_at, end_at)`: Get cash flow records

@@ -1948,7 +1948,7 @@ default_values(::Type{OptionQuote}) = (;
     volume = zero(Int64),
     turnover = "",
     trade_status = TradeStatus.Normal,
-    option_extend = OptionExtend("", 0, "", "", "", "", "", "", "", ""),
+    option_extend = OptionExtend("", 0, Date(1970, 1, 1), "", "", "", "", "", "", ""),
 )
 field_numbers(::Type{OptionQuote}) = (;
     symbol = 1,

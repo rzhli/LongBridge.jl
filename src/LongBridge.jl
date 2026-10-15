@@ -132,7 +132,7 @@ export LongBridgeError, UnexpectedHttpResponse, ApiResponse
 
 # --- Config ---
 export Settings, config, from_oauth                        # 配置加载（config 是 Settings 的兼容别名）
-export enable_papertrading!, dc_region
+export enable_papertrading!, dc_region, QuoteTransport
 
 # --- OAuth ---
 export OAuthBuilder, OAuthHandle, OAuthToken, build

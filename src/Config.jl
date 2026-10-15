@@ -1,6 +1,6 @@
 module Config
 
-using TOML
+using TOML, EnumX
 using HTTP, JSON, Dates
 using ..Constant
 using ..Errors: LongBridgeError
@@ -12,7 +12,18 @@ export Settings,
     from_toml,
     from_oauth,
     enable_papertrading!,
-    dc_region
+    dc_region,
+    QuoteTransport
+
+"""Transport for quote pull APIs; subscriptions and pushes still use WebSocket."""
+@enumx QuoteTransport WebSocket = 0 Http = 1
+
+_quote_transport(value::QuoteTransport.T) = value
+function _quote_transport(value::AbstractString)
+    value == "ws" && return QuoteTransport.WebSocket
+    value == "http" && return QuoteTransport.Http
+    throw(ArgumentError("quote_transport must be ws or http, got $(repr(value))"))
+end
 
 """
 Configuration options for Longport SDK
@@ -21,6 +32,7 @@ Args:
     app_secret: App Secret
     access_token: Access Token
     http_url: HTTP API url
+    quote_transport: QuoteTransport.WebSocket (default) or QuoteTransport.Http; env LONGBRIDGE_QUOTE_TRANSPORT=ws|http
     quote_ws_url: Websocket url for quote API
     trade_ws_url: Websocket url for trade API
     language: Language identifier
@@ -43,6 +55,7 @@ mutable struct Settings
     enable_papertrading::Bool
     auth_mode::Symbol          # :apikey or :oauth
     oauth::Union{Nothing,OAuthHandle}
+    quote_transport::QuoteTransport.T
 
     function Settings(
         app_key::String,
@@ -55,6 +68,7 @@ mutable struct Settings
         language::Language.T = Language.ZH_CN,
         enable_overnight::Bool = true,   # 美股夜盘交易行情，需订阅US LV1实时行情并开启enable_overnight参数，否则会返回null
         enable_papertrading::Bool = false,
+        quote_transport::Union{QuoteTransport.T,AbstractString} = get(ENV, "LONGBRIDGE_QUOTE_TRANSPORT", "ws"),
     )
         new(
             app_key,
@@ -69,6 +83,7 @@ mutable struct Settings
             enable_papertrading,
             :apikey,
             nothing,
+            _quote_transport(quote_transport),
         )
     end
 end
@@ -174,7 +189,9 @@ function from_toml(path::AbstractString)
         http_url = http_url,
         quote_ws_url = quote_ws_url,
         trade_ws_url = trade_ws_url,
+        enable_overnight = get(config_dict, "enable_overnight", true),
         enable_papertrading = enable_papertrading,
+        quote_transport = get(config_dict, "quote_transport", get(ENV, "LONGBRIDGE_QUOTE_TRANSPORT", "ws")),
     )
 end
 
@@ -221,6 +238,7 @@ skipped and a Bearer token is used instead.
 - `trade_ws_url`: WebSocket url for trade API (default: CN endpoint)
 - `language`: Language identifier (default: ZH_CN)
 - `enable_overnight`: Enable overnight quote (default: true)
+- `quote_transport`: `QuoteTransport.WebSocket` / `QuoteTransport.Http` (or `"ws"` / `"http"`); defaults to `LONGBRIDGE_QUOTE_TRANSPORT`, then WebSocket
 """
 function from_oauth(
     oauth_handle::OAuthHandle;
@@ -230,6 +248,7 @@ function from_oauth(
     language::Language.T = Language.ZH_CN,
     enable_overnight::Bool = true,
     enable_papertrading::Bool = false,
+    quote_transport::Union{QuoteTransport.T,AbstractString} = get(ENV, "LONGBRIDGE_QUOTE_TRANSPORT", "ws"),
 )
     cfg = Settings(
         oauth_handle.client_id,   # app_key = client_id
@@ -242,6 +261,7 @@ function from_oauth(
         language = language,
         enable_overnight = enable_overnight,
         enable_papertrading = enable_papertrading,
+        quote_transport = quote_transport,
     )
     cfg.auth_mode = :oauth
     cfg.oauth = oauth_handle

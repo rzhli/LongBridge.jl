@@ -23,6 +23,7 @@ using ..QuoteProtocol:
     SubscriptionRequest,
     SubscriptionResponse,
     MultiSecurityRequest,
+    SecurityQuote,
     SecurityQuoteResponse,
     SecurityRequest,
     SecurityDepthResponse,
@@ -301,8 +302,22 @@ function _wait_for_quote_reconnect!(inner::InnerQuoteContext; timeout::Real = RE
            inner.ws_client.connected
 end
 
+function _start_quote_tasks!(inner::InnerQuoteContext)
+    # No yield before publishing the task: concurrent first-use callers cannot
+    # start duplicate workers. Tasks retain inner, never the finalizable handle.
+    if isnothing(inner.background_task) && !_is_shutdown(inner)
+        inner.background_task = errormonitor(@async run_quote_loop(inner))
+        inner.push_dispatcher_task =
+            errormonitor(@async dispatch_push_events(inner, inner.push_ch))
+    end
+    return
+end
+
 function _submit_command!(ctx::QuoteContext, cmd::AbstractCommand)
     inner = ctx.inner
+    if inner.config.quote_transport === QuoteTransport.Http
+        _start_quote_tasks!(inner)
+    end
     task = inner.background_task
     if _is_shutdown(inner) || isnothing(task) || istaskdone(task) || !isopen(inner.command_ch)
         throw(LongBridgeError(500, "Quote background task is not running"))
@@ -641,7 +656,9 @@ end
 Creates and initializes a `QuoteContext`.
 
 This is the main entry point for using the quote API. It sets up the WebSocket
-connection and the background tasks.
+connection and the background tasks. With `QuoteTransport.Http`, pull APIs use
+HTTP without starting a WebSocket; subscriptions and profile queries start it
+on first use. Realtime getters continue to read the local push cache.
 
 # Arguments
 - `config::Config.Settings`: The configuration object.
@@ -677,12 +694,8 @@ function _build_quote_context(config::Config.Settings; start_tasks::Bool = true)
     ctx = QuoteContext(inner)
     finalizer(_finalize_quote_context!, ctx)
 
-    if start_tasks
-        # Tasks retain only `inner`, so dropping the outer Context can run its
-        # finalizer and signal both loops to stop.
-        inner.background_task = errormonitor(@async run_quote_loop(inner))
-        inner.push_dispatcher_task =
-            errormonitor(@async dispatch_push_events(inner, push_ch))
+    if start_tasks && config.quote_transport === QuoteTransport.WebSocket
+        _start_quote_tasks!(inner)
     end
 
     return ctx
@@ -700,11 +713,30 @@ Disconnects the WebSocket and shuts down the background tasks.
 # response Type as a parameter, so we can assert ::T after `take!` and
 # propagate concrete type info to every downstream `.field` access at
 # the call site (eliminates the previous Any → field-access widening).
+include("QuoteHttp.jl")
+
 function request(ctx::QuoteContext, cmd::GenericRequestCmd{R,T}) where {R,T}
+    if ctx.inner.config.quote_transport === QuoteTransport.Http
+        path = get(QUOTE_HTTP_PATHS, cmd.cmd_code, nothing)
+        if !isnothing(path)
+            resp = _quote_http_request(ctx, path, cmd.request_pb, T)
+            return _align_http_overnight(ctx, cmd.request_pb, resp)::T
+        end
+    end
     _submit_command!(ctx, cmd)
     resp = _take_task_response!(cmd.resp_ch, "Quote")
     resp isa Exception && throw(resp)
     return resp::T
+end
+
+# HTTP-only APIs must not wake up the lazy quote WebSocket either.
+function request(ctx::QuoteContext, cmd::Union{HttpGetCmd,HttpPostCmd,HttpPutCmd,HttpDeleteCmd})
+    if ctx.inner.config.quote_transport === QuoteTransport.Http
+        _is_shutdown(ctx.inner) && throw(LongBridgeError(500, "Quote context is closed"))
+        resp = _execute_command_once(ctx.inner, cmd)
+        return resp isa HTTP.Response ? JSON.parse(resp.body) : resp
+    end
+    return invoke(request, Tuple{QuoteContext,AbstractCommand}, ctx, cmd)
 end
 
 # Generic fallback for HTTP* commands (no compile-time response type).
@@ -779,7 +811,7 @@ end
 """
     quote_snapshot(ctx::QuoteContext, symbols::Vector{String}) -> DataFrame
 
-Fetch a one-shot quote snapshot from the server (WebSocket request).
+Fetch a one-shot quote snapshot from the server (configured WebSocket or HTTP transport).
 Use [`realtime_quote`](@ref) instead when you have an active subscription and want the
 locally cached latest push.
 
@@ -1427,16 +1459,33 @@ function us_crypto_overview(ctx::QuoteContext, symbol::AbstractString)
     return USProtocol.normalize_symbols!(result)
 end
 
-member_id(ctx::QuoteContext) = ctx.inner.member_id
-quote_level(ctx::QuoteContext) = ctx.inner.quote_level
+function _ensure_quote_profile!(ctx::QuoteContext)
+    inner = ctx.inner
+    if inner.config.quote_transport === QuoteTransport.Http && inner.member_id == 0
+        lang = inner.config.language
+        lang_str = lang === Constant.Language.EN ? "en" :
+                   lang === Constant.Language.ZH_HK ? "zh-HK" : "zh-CN"
+        profile = request(ctx, GenericRequestCmd(QuoteCommand.QueryUserQuoteProfile,
+            UserQuoteProfileRequest(lang_str), UserQuoteProfileResponse, Channel(1)))
+        inner.member_id = profile.member_id
+        inner.quote_level = profile.quote_level
+        inner.subscribe_limit = profile.subscribe_limit
+        inner.history_candlestick_limit = profile.history_candlestick_limit
+        inner.quote_package_details = profile.quote_package_details
+    end
+    return inner
+end
 
-"""Return the account subscription limit, or `nothing` until profile loading completes."""
-subscribe_limit(ctx::QuoteContext) = ctx.inner.subscribe_limit
+member_id(ctx::QuoteContext) = _ensure_quote_profile!(ctx).member_id
+quote_level(ctx::QuoteContext) = _ensure_quote_profile!(ctx).quote_level
 
-"""Return the account history-candlestick limit, or `nothing` until profile loading completes."""
-history_candlestick_limit(ctx::QuoteContext) = ctx.inner.history_candlestick_limit
+"""Return the account subscription limit; in HTTP mode the profile is loaded on first use."""
+subscribe_limit(ctx::QuoteContext) = _ensure_quote_profile!(ctx).subscribe_limit
 
-quote_package_details(ctx::QuoteContext) = ctx.inner.quote_package_details
+"""Return the account history-candlestick limit; in HTTP mode load the profile on first use."""
+history_candlestick_limit(ctx::QuoteContext) = _ensure_quote_profile!(ctx).history_candlestick_limit
+
+quote_package_details(ctx::QuoteContext) = _ensure_quote_profile!(ctx).quote_package_details
 
 # --- Watchlist API ---
 

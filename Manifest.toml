@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.13.0"
+julia_version = "1.13.1"
 manifest_format = "2.1"
-project_hash = "5fc5f30497ff7b3e5b2367120e36c10eab3a4de0"
+project_hash = "ba943a75fea9459d8e90cca35de32c0711d8b64e"
 
 [[deps.Artifacts]]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
@@ -87,10 +87,10 @@ version = "1.4.2"
 
 [[deps.DecFP_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "40e4404a0a267a8e75f5c1ce2cc9b5e2ce1ba268"
+git-tree-sha1 = "74f3b68c552c8efc70bac316a3ab4057a1a5288a"
 registries = "General"
 uuid = "47200ebd-12ce-5be5-abb7-8e082af23329"
-version = "2.0.300+0"
+version = "2.0.400+0"
 
 [[deps.DocStringExtensions]]
 git-tree-sha1 = "7442a5dfe1ebb773c29cc2962a8980f47221d76c"
@@ -114,11 +114,11 @@ uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 version = "1.11.0"
 
 [[deps.HTTP]]
-deps = ["Base64", "CodecZlib", "Dates", "EnumX", "PrecompileTools", "Random", "Reseau", "SHA", "URIs", "UUIDs", "Zlib_jll"]
-git-tree-sha1 = "b0ff6627f1308bc1691528aac3b70ac3abd1d598"
+deps = ["Base64", "CodecZlib", "Dates", "EnumX", "Logging", "PrecompileTools", "Random", "Reseau", "SHA", "URIs", "UUIDs", "Zlib_jll"]
+git-tree-sha1 = "ed18c529d170d8431c9d91537520b6d3dec052ca"
 registries = "General"
 uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
-version = "2.6.7"
+version = "2.9.0"
 
 [[deps.InlineStrings]]
 git-tree-sha1 = "06b65886c7577a3784d616e29f1302c2e36e389d"
@@ -166,10 +166,10 @@ version = "1.8.0"
 
 [[deps.JSON]]
 deps = ["Dates", "Logging", "Parsers", "PrecompileTools", "StructUtils", "UUIDs", "Unicode"]
-git-tree-sha1 = "88352712893ec50bee3680605891eaf0e9ed6368"
+git-tree-sha1 = "4657a834b01ce00f2b94546095c4350617b9af2c"
 registries = "General"
 uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
-version = "1.8.0"
+version = "1.10.0"
 
     [deps.JSON.extensions]
     JSONArrowExt = ["ArrowTypes"]
@@ -199,10 +199,10 @@ version = "1.13.0"
 
 [[deps.LogExpFunctions]]
 deps = ["DocStringExtensions", "IrrationalConstants", "LinearAlgebra"]
-git-tree-sha1 = "bba2d9aa057d8f126415de240573e86a8f39d2a1"
+git-tree-sha1 = "b85e2797b2409570e84c4de46238c0ed5f6476ae"
 registries = "General"
 uuid = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
-version = "1.0.1"
+version = "1.0.2"
 
     [deps.LogExpFunctions.extensions]
     LogExpFunctionsChainRulesCoreExt = "ChainRulesCore"
@@ -222,7 +222,7 @@ version = "1.11.0"
 deps = ["Base64", "CodecZlib", "DataFrames", "Dates", "DecFP", "EnumX", "HTTP", "JSON", "Logging", "PrecompileTools", "Printf", "ProtoBuf", "Random", "SHA", "TOML", "URIs"]
 path = "."
 uuid = "d6178d20-a635-452c-a447-f7a195f79261"
-version = "0.9.6"
+version = "0.12.0"
 
     [deps.LongBridge.extensions]
     LongBridgeTimeZonesExt = "TimeZones"
@@ -269,10 +269,10 @@ uuid = "efe28fd5-8261-553b-a9e1-b2916fc3738e"
 version = "0.5.6+0"
 
 [[deps.OrderedCollections]]
-git-tree-sha1 = "05f45c2e0de6259db764adbfd2f1dc6d3f8de13c"
+git-tree-sha1 = "b079a6affebde167dad8ffe0d670b53917fbcb68"
 registries = "General"
 uuid = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
-version = "2.0.1"
+version = "2.0.3"
 
 [[deps.Parsers]]
 deps = ["Dates", "PrecompileTools"]
@@ -297,24 +297,26 @@ version = "1.3.4"
 
 [[deps.Preferences]]
 deps = ["TOML"]
-git-tree-sha1 = "8b770b60760d4451834fe79dd483e318eee709c4"
+git-tree-sha1 = "5005266de4bfe50e53ff44a5cb5c540b6e47a254"
 registries = "General"
 uuid = "21216c6a-2e73-6563-6e65-726566657250"
-version = "1.5.2"
+version = "1.6.0"
 
 [[deps.PrettyTables]]
-deps = ["Crayons", "LaTeXStrings", "Markdown", "PrecompileTools", "Printf", "REPL", "Reexport", "StringManipulation", "Tables"]
-git-tree-sha1 = "1b8aa19f229b1cea7fc93874a52e49db6a854450"
+deps = ["Crayons", "LaTeXStrings", "Markdown", "PrecompileTools", "Printf", "REPL", "Reexport", "StringManipulation", "StyledStrings", "Tables"]
+git-tree-sha1 = "99fd8f32ab6728ff205cddd24e2d9ea6cbb498d3"
 registries = "General"
 uuid = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
-version = "3.4.8"
+version = "3.5.0"
 
     [deps.PrettyTables.extensions]
     PrettyTablesExcelExt = "XLSX"
     PrettyTablesTypstryExt = "Typstry"
+    PrettyTablesWriteDocxExt = "WriteDocx"
 
     [deps.PrettyTables.weakdeps]
     Typstry = "f0ed7684-a786-439e-b1e3-3b82803b501e"
+    WriteDocx = "d049ceea-54ee-41d7-a26f-ba29db3b6599"
     XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
 
 [[deps.Printf]]
@@ -347,10 +349,10 @@ version = "1.2.2"
 
 [[deps.Reseau]]
 deps = ["NetworkOptions", "OpenSSL_jll", "PrecompileTools", "Random", "SHA"]
-git-tree-sha1 = "aaee74fab545e9af4b21d10c2203c93c636c4ae0"
+git-tree-sha1 = "3c8cb8ecab28eec47a02d56a44d4929b85fbab55"
 registries = "General"
 uuid = "802f3686-a58f-41ce-bb0c-3c43c75bba36"
-version = "1.4.1"
+version = "1.6.0"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
@@ -401,25 +403,27 @@ version = "1.11.5"
     SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [[deps.StringManipulation]]
-deps = ["PrecompileTools"]
-git-tree-sha1 = "773065c6e0e903924a9d838259be74338422aef2"
+deps = ["PrecompileTools", "StyledStrings"]
+git-tree-sha1 = "9e3a02d73a8f0a9be04e677dbef758aab40f8bea"
 registries = "General"
 uuid = "892a3eda-7b42-436c-8928-eab12a02cf0e"
-version = "0.5.0"
+version = "0.6.1"
 
 [[deps.StructUtils]]
 deps = ["Dates", "UUIDs"]
-git-tree-sha1 = "2d0fc55c61321ba245c47be599570d11bac50303"
+git-tree-sha1 = "b814d5005d6a529d740ffe06f8a86396f6501138"
 registries = "General"
 uuid = "ec057cc2-7a8d-4b58-b3b3-92acb9f63b42"
-version = "2.8.5"
+version = "2.9.2"
 
     [deps.StructUtils.extensions]
+    StructUtilsLazilyInitializedFieldsExt = ["LazilyInitializedFields"]
     StructUtilsMeasurementsExt = ["Measurements"]
     StructUtilsStaticArraysCoreExt = ["StaticArraysCore"]
     StructUtilsTablesExt = ["Tables"]
 
     [deps.StructUtils.weakdeps]
+    LazilyInitializedFields = "0e77f7df-68c5-4e49-93ce-4cd80f5598bf"
     Measurements = "eff96d63-e80a-5855-80a2-b1b0885c5ab7"
     StaticArraysCore = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
     Tables = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"

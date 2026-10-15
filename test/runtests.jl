@@ -52,6 +52,10 @@ include("test_v0_10_0_sync.jl")
 # v0.11.0 / upstream v5.2.0 (FundContext, calendar pagination, fund counter IDs)
 include("test_v0_11_0_sync.jl")
 
+# v0.12.0 / upstream v5.2.1: delayed orders and HTTP quote transport.
+include("test_v5_2_1_sync.jl")
+include("test_quote_http_overnight.jl")
+
 # JSON3.jl -> JSON.jl 1.0 迁移：解析/构造行为回归
 include("test_json_migration.jl")
 

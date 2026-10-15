@@ -1,5 +1,39 @@
 # Release Notes
 
+## v0.12.0 (2026-10-15)
+
+Syncs `longbridge/openapi` v5.2.1 (`9940c786`), including #595 and #604.
+
+### New features
+
+- **Time-condition orders:** `SubmitOrderOptions` and `SubmitMultiLegOrderOptions` gain optional `delayed_until::DateTime` (UTC). The server holds the order in `DelayedNotReported` and submits it at that time. It must be later than now and at most 90 days ahead; multi-leg time conditions support only LO / MO. These restrictions are validated by the server, matching upstream.
+- **Replace:** `ReplaceOrderOptions.delayed_until` moves the time; `clear_delayed_until=true` takes precedence and sends the wire sentinel `delayed_until=1`. Leaving both unset preserves the condition. Timestamps at or before Unix second 1 are clamped to 2 so an invalid past date cannot silently submit a regular order or clear a condition.
+- **Order readback:** `Order` / `OrderDetail` gain `delayed_until`; order-list DataFrames append a `Delayed Until` column. Readback uses the existing trade timestamp convention (UTC+8 `DateTime`, unlike UTC request dates). Missing, null, zero, negative, malformed or out-of-range values become `nothing`; Unix seconds encoded as numbers or strings are accepted.
+- **New order status:** `OrderStatus.DelayedNotReported = 18` is appended after `PartialWithdrawal = 17`; all previous values are unchanged, including order-changed push parsing.
+- **Quote HTTP transport:** `QuoteTransport.WebSocket` (default) / `QuoteTransport.Http`, configured through `Settings`, `from_oauth`, TOML `quote_transport = "http"`, or `LONGBRIDGE_QUOTE_TRANSPORT=ws|http`. Explicit configuration overrides the environment. Invalid values raise `ArgumentError`.
+- All 20 pull methods backed by 19 mapped quote commands can now use `POST /quote/*`, retaining their public return types. HTTP-only usage does not start a WebSocket. Subscriptions and account quote-profile queries start the WS worker on demand; realtime getters still read the local push cache. Existing HTTP-only quote APIs also avoid starting a socket in HTTP mode.
+- HTTP decoding handles numeric strings, camelCase keys, absent/null fields, nested messages and unknown keys. With `enable_overnight=false`, US equity overnight quotes and intraday lines are removed; all-session K-line windows filter overnight bars and refill capped windows (at most 8 extra requests, at most 1000 bars each). Indices and non-US symbols are not filtered.
+
+### Compatibility fixes
+
+- `Config.from_toml` now reads `enable_overnight`, so `enable_overnight = false` takes effect with either quote transport.
+- HTTP trade-type decoding uses the market-specific wire string, not Julia enum ordinals. Missing/null codes match the WebSocket's empty-string default; numeric US code `1` is read as `"1"` (`StoppedStock`). Numeric enums also accept the gateway's empty-string zero value.
+- Proto-JSON decoding accepts boolean spellings and rejects malformed integer/string shapes instead of silently converting integral floats or objects into valid-looking data.
+
+### Migration notes
+
+- Existing keyword-based order options keep their defaults: no `delayed_until` means an ordinary order; replacement without either time-condition option preserves the current condition. Positional construction of `SubmitOrderOptions`, `SubmitMultiLegOrderOptions`, `ReplaceOrderOptions`, `Order`, or `OrderDetail` must account for the appended fields (use `nothing` / `false` when unset). Code matching the full order-status set should handle `DelayedNotReported`.
+- Order-list DataFrames append a `Delayed Until` column. Do not feed its UTC+8 values directly back into a UTC request; subtract `Hour(8)` first if reusing a readback timestamp.
+- The minimum HTTP.jl version is now 2.8 (still within major version 2); the committed Manifest records the tested dependency set.
+- Updated the local interactive `quote_test.jl` / `trade_test.jl` examples with transport selection, lazy profile queries, delayed-order operations and explicit protocol-type imports. These files remain gitignored local examples; the published READMEs contain the configuration and time-condition usage examples.
+
+### Caveats and tests
+
+- The HTTP gateway may expose different business error codes or replica values than WS; overnight intraday data can be empty after filtering. HTTP uses the shared client's retry policy, not WS per-command rate limiting. A failed refill fails the call; hitting its round limit logs a warning and returns the available bars.
+- Adds loopback tests covering all mapped quote endpoints, configuration (including invalid environment values and explicit overrides), delayed-order submission/replacement/readback/push status, lazy WS routing, DST boundaries, and bidirectional/date-range overnight refill. Includes HTTP/WS trade-type parity and delayed timestamp boundary/malformed-value regressions. No live account orders are submitted.
+- Validation: `julia --project=. --startup-file=no test/runtests.jl` passes all 1,756 assertions; 44 offline checks validate the local interactive examples, and 28 checks validate README syntax, time-condition option construction and release metadata. No live authentication or trading calls were executed during these checks.
+- This is a native Julia SDK, not a C/C++ binding. Upstream's header rebuild / zero-initialized C option-struct requirement does not apply here; the Go SDK ships separately as `openapi-go v0.29.1`.
+
 ## v0.11.0 (2026-10-01)
 
 Sync with upstream `longbridge/openapi` **v5.2.0** (`b2f749a3`, released 2026-09-30).

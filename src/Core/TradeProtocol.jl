@@ -121,6 +121,7 @@ end
     CanceledStatus = 15           # 已撤单
     ExpiredStatus = 16            # 已过期
     PartialWithdrawal = 17  # 部分撤单
+    DelayedNotReported = 18 # 时间条件单监控中（追加，保留旧枚举值）
 end
 
 # 交易网关命令定义
@@ -687,6 +688,7 @@ struct Order
     outside_rth::OutsideRTH.T
     remark::String
     multi_leg::Union{MultiLegInfo,Nothing}
+    delayed_until::Union{DateTime,Nothing} # UTC+8, like submitted_at
 end
 
 
@@ -827,6 +829,7 @@ struct OrderDetail
     history::Vector{OrderHistoryDetail}
     charge_detail::OrderChargeDetail
     multi_leg::Union{MultiLegInfo,Nothing}
+    delayed_until::Union{DateTime,Nothing} # UTC+8, like submitted_at
 end
 
 function Base.show(io::IO, d::OrderDetail)
@@ -1243,6 +1246,8 @@ end
 提交多腿期权组合订单的参数（`POST /v1/trade/order/multileg`）。
 
 `submitted_price` 对 LO 等限价类型必填；`client_request_id` 用于 10 分钟幂等控制。
+`delayed_until` 是 UTC `DateTime`：服务端在该时刻自动提交，此前状态为
+`DelayedNotReported`。必须晚于当前时间且不超过 90 天；多腿时间条件单仅支持 LO / MO。
 """
 Base.@kwdef struct SubmitMultiLegOrderOptions
     side::OrderSide.T
@@ -1253,8 +1258,14 @@ Base.@kwdef struct SubmitMultiLegOrderOptions
     submitted_price::Union{Float64,Nothing} = nothing
     remark::Union{String,Nothing} = nothing
     client_request_id::Union{String,Nothing} = nothing
+    delayed_until::Union{DateTime,Nothing} = nothing
 end
 
+"""
+Submit an order. `delayed_until` is a UTC `DateTime`, later than now and at most
+90 days ahead (validated by the server). Until then the order remains in
+`DelayedNotReported`. Omit it for a regular order.
+"""
 Base.@kwdef struct SubmitOrderOptions
     symbol::String
     order_type::OrderType.T
@@ -1274,12 +1285,20 @@ Base.@kwdef struct SubmitOrderOptions
     trigger_count::Union{Int,Nothing} = nothing
     monitor_price::Union{Float64,Nothing} = nothing
     client_request_id::Union{String,Nothing} = nothing
+    delayed_until::Union{DateTime,Nothing} = nothing
 end
 
+"""
+Replace an order. `delayed_until` moves the submit time (UTC `DateTime`, later
+than now and at most 90 days ahead). `clear_delayed_until=true` takes precedence
+and turns it into a regular order. Leaving both unset preserves the condition.
+"""
 Base.@kwdef struct ReplaceOrderOptions
     order_id::String
     submitted_quantity::Int
     submitted_price::Union{Float64,Nothing} = nothing
+    delayed_until::Union{DateTime,Nothing} = nothing
+    clear_delayed_until::Bool = false
 end
 
 Base.@kwdef struct GetHistoryExecutionsOptions

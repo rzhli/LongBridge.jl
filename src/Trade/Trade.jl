@@ -400,10 +400,13 @@ end
 function to_dict(opts)
     d = Dict{String,Any}()
     for name in fieldnames(typeof(opts))
+        name === :clear_delayed_until && continue # encoded as delayed_until=1 below
         val = getfield(opts, name)
         if !isnothing(val)
             key = string(name)
-            if val isa Date || val isa DateTime
+            if name === :delayed_until
+                d[key] = _delayed_until_timestamp(val)
+            elseif val isa Date || val isa DateTime
                 d[key] = string(round(Int, datetime2unix(DateTime(val))))
             elseif val isa Vector && !isempty(val)
                 # Coerce to homogeneous Vector{String} to avoid Union widening
@@ -418,7 +421,24 @@ function to_dict(opts)
             end
         end
     end
+    if opts isa ReplaceOrderOptions && opts.clear_delayed_until
+        d["delayed_until"] = 1
+    end
     d
+end
+
+# 0 = no condition, 1 = clear. Never let an early date silently submit a regular
+# order: clamp to 2, which the server rejects as a past time (same as upstream).
+_delayed_until_timestamp(value::DateTime) = max(2, floor(Int64, datetime2unix(value)))
+
+# Be lenient only for the newly introduced field. Keep the existing response
+# timestamp convention (UTC+8), and reject values outside upstream's year range.
+function _parse_delayed_until(value)
+    value isa Bool && return nothing
+    ts = value isa Integer ? value :
+         value isa AbstractString ? tryparse(Int64, value) : nothing
+    (isnothing(ts) || !(0 < ts <= 253402300799)) && return nothing
+    return to_china_time(ts)
 end
 
 _outside_rth_str(value::OutsideRTH.T) =
@@ -447,6 +467,7 @@ function _parse_order_data(o)
     d["trailing_percent"] = safeparse(Float64, d["trailing_percent"])
     d["limit_offset"] = safeparse(Float64, d["limit_offset"])
     d["multi_leg"] = _parse_multi_leg(get(d, "multi_leg", nothing))
+    d["delayed_until"] = _parse_delayed_until(get(d, "delayed_until", nothing))
     return d
 end
 
@@ -484,6 +505,7 @@ function _orders_to_dataframe(orders::AbstractVector{Order})
         "Quantity" => [o.quantity for o in orders],
         "Price" => [o.price for o in orders],
         "Submitted At" => [o.submitted_at for o in orders],
+        "Delayed Until" => [o.delayed_until for o in orders],
     )
 end
 
@@ -666,6 +688,8 @@ function submit_multileg(ctx::TradeContext, options::SubmitMultiLegOrderOptions)
     isnothing(options.remark) || (body["remark"] = options.remark)
     isnothing(options.client_request_id) ||
         (body["client_request_id"] = options.client_request_id)
+    isnothing(options.delayed_until) ||
+        (body["delayed_until"] = _delayed_until_timestamp(options.delayed_until))
     cmd = HttpPostCmd("/v1/trade/order/multileg", body, Channel(1))
     resp = request(ctx, cmd)
     if resp.code == 0
@@ -827,6 +851,7 @@ function order_detail(ctx::TradeContext, order_id::AbstractString)
         end
 
         d["multi_leg"] = _parse_multi_leg(get(d, "multi_leg", nothing))
+        d["delayed_until"] = _parse_delayed_until(get(d, "delayed_until", nothing))
 
         return JSON.parse(JSON.json(d), OrderDetail)
     else
