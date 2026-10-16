@@ -223,15 +223,20 @@ export GetHistoryExecutionsOptions,
     GetHistoryOrdersOptions,
     ReplaceOrderOptions,
     SubmitOrderOptions,
+    SubmitAttachedParams,
+    ReplaceAttachedParams,
     GetTodayOrdersOptions
 # 枚举类型
 export OrderType,
     OrderSide,
     OrderStatus,
     OrderTag,
+    AttachedOrderType,
     TimeInForceType,
     OutsideRTH,
     TopicType
+
+export AttachedOrderDetail
 
 # --- Trade (交易模块) ---
 # Context

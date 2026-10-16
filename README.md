@@ -6,21 +6,19 @@ This is an unofficial SDK, currently for personal use only. Some functions in th
 ## Release Notes
 See [NEWS.md](NEWS.md) for detailed release notes.
 
-Latest release: **v0.12.0** — sync with upstream openapi v5.2.1: time-condition orders and HTTP quote transport.
+Latest release: **v0.13.0** — sync with upstream openapi v5.2.2: attached take-profit / stop-loss depth levels.
 
-### v0.12.0 highlights
+### v0.13.0 highlights
 
-- **HTTP quote pulls:** use `Config.from_oauth(oauth; quote_transport=QuoteTransport.Http)` or `Config.Settings(...; quote_transport=QuoteTransport.Http)`. Alternatively set `LONGBRIDGE_QUOTE_TRANSPORT=http` before constructing the config, or add `quote_transport = "http"` to TOML. The default is `ws`; explicit configuration wins over the environment. Pull-only usage opens no WebSocket; subscriptions and quote-profile queries connect on demand. Realtime getters still read the push cache. `enable_overnight=false` (also read from TOML) applies over HTTP, including bounded K-line refill after filtering overnight bars.
-- **Time-condition orders:** set `delayed_until=now(Dates.UTC)+Hour(1)` in `SubmitOrderOptions` or `SubmitMultiLegOrderOptions`. The server holds the order in `OrderStatus.DelayedNotReported` until then. The time must be in the future and within 90 days; multi-leg time conditions only support LO / MO. Validation is server-side, as upstream.
-- **Replace / readback:** set `ReplaceOrderOptions.delayed_until` to reschedule, or `clear_delayed_until=true` to remove the condition (clear wins if both are set). Omit both to keep it unchanged. Read `order_detail(ctx, id).delayed_until` or the `Delayed Until` order-list column. Request `DateTime`s are **UTC**; readback follows existing trade timestamps (**UTC+8**, `nothing` when unset).
+- Adds `AttachedOrderType`, `SubmitAttachedParams`, `ReplaceAttachedParams` and `AttachedOrderDetail`, completing the prerequisite attached-order models. Pass `attached_params` in submit/replace options.
+- Optional `profit_taker_depth_level` / `stop_loss_depth_level` (Int32) select the bid/ask level for the take-profit / stop-loss limit order's submitted price when `activate_order_type = OrderType.LIT`. Business restrictions are validated by the server.
+- `order_detail(...).attached_orders` and the `Attached Orders` column in today/history order lists expose typed attached orders. Readback `limit_depth_level` accepts integers or integer strings; missing, null, zero, invalid and out-of-range values become `nothing`.
 
-HTTP gateway errors/data can differ from WebSocket results. See [NEWS.md](NEWS.md) for transport caveats, test coverage, and earlier release notes.
+### v0.13.0 migration notes
 
-### v0.12.0 migration notes
-
-- Existing keyword-based order options remain valid. Positional constructors for order options, `Order`, and `OrderDetail` must include the new trailing fields (`nothing` / `false` when unset).
-- Order-list DataFrames append `Delayed Until`; status handling should recognize `DelayedNotReported`. Clearing a time condition is **not cancellation**: a regular order may be reported immediately. Do not reuse UTC+8 readback dates in UTC requests without subtracting `Hour(8)`.
-- HTTP.jl **2.8 or later within major version 2** is required. The default quote transport remains WebSocket; `QuoteTransport` does not affect trade transport.
+- Existing keyword constructors are unchanged; omitting `attached_params` preserves the request body. Positional constructors for `SubmitOrderOptions` / `ReplaceOrderOptions` need a trailing `nothing`; `Order` / `OrderDetail` need a trailing `AttachedOrderDetail[]`.
+- Order-list DataFrames append `Attached Orders`; absent/null collections in older responses become empty vectors. Attached-order prices/quantities use `Dec64` and readback timestamps use UTC+8; request `expire_time` is Unix seconds.
+- Upstream Node.js/Python binary build and publishing fixes do not apply to the native Julia implementation. See [NEWS.md](NEWS.md) for historical changes and test coverage.
 
 References:
 
@@ -279,6 +277,48 @@ and pass `delayed_until` in `SubmitMultiLegOrderOptions`. Time conditions suppor
 only `LO` / `MO` for multi-leg orders. Choose valid, unexpired contracts. All time
 conditions must be later than now and at most 90 days ahead (server validation).
 
+### Attached Take-profit / Stop-loss Orders
+
+Constructing options sends no request. Write calls below are commented out;
+review the account, prices, quantities, order IDs and trading hours before use.
+Depth levels apply to LIT orders and are validated by the server.
+
+```julia
+using LongBridge
+using DecFP: Dec64
+
+attached = SubmitAttachedParams(
+    attached_order_type = AttachedOrderType.Bracket,
+    profit_taker_price = Dec64("330"), stop_loss_price = Dec64("280"),
+    activate_order_type = OrderType.LIT,
+    profit_taker_depth_level = 2, stop_loss_depth_level = 5,
+)
+options = SubmitOrderOptions(
+    symbol = "700.HK", order_type = OrderType.LO, side = OrderSide.Buy,
+    submitted_quantity = 100, time_in_force = TimeInForceType.Day,
+    submitted_price = 300.0, attached_params = attached,
+)
+# submit_order(trade_ctx, options)
+
+replacement = ReplaceOrderOptions(
+    order_id = "<order-id>", submitted_quantity = 100,
+    attached_params = ReplaceAttachedParams(
+        attached_order_type = AttachedOrderType.Bracket,
+        activate_order_type = OrderType.LIT,
+        profit_taker_depth_level = 3, stop_loss_depth_level = 5,
+    ),
+)
+# replace_order(trade_ctx, replacement)
+# detail = order_detail(trade_ctx, "<order-id>")
+# detail.attached_orders  # Vector{AttachedOrderDetail}
+# today_orders(trade_ctx)[!, "Attached Orders"]
+```
+
+To modify existing attached orders, set `profit_taker_id` / `stop_loss_id` (Int64).
+`cancel_all_attached=true` requests cancellation of all attached orders;
+omitting it does not cancel them. Unset optional fields are omitted; explicit
+zero/false are preserved. `expire_time` uses Unix seconds.
+
 ### Real-time Quote Subscription
 
 ```julia
@@ -369,10 +409,10 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `today_executions(ctx; symbol)`: Get today's executions
 - `history_executions(ctx; symbol, start_at, end_at)`: Get all historical executions (auto-paged, returns `Vector{Execution}`)
 - `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: Get all executions (`AllExecutionsResponse`)
-- `order_detail(ctx, order_id)`: Get order detail (includes `multi_leg` for combination orders and optional `delayed_until`)
-- `submit_order(ctx, ::SubmitOrderOptions)`: Submit an order; optional `delayed_until` schedules server-side submission
+- `order_detail(ctx, order_id)`: Get order detail (includes `multi_leg`, optional `delayed_until` and `attached_orders`)
+- `submit_order(ctx, ::SubmitOrderOptions)`: Submit an order; optional `delayed_until` schedules submission and `attached_params` configures attached orders
 - `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: Submit a multi-leg option combination order; time conditions require LO / MO
-- `replace_order(ctx, ::ReplaceOrderOptions)`: Modify an order; reschedule with `delayed_until` or remove the time condition with `clear_delayed_until=true`
+- `replace_order(ctx, ::ReplaceOrderOptions)`: Modify an order; reschedule with `delayed_until` or clear it with `clear_delayed_until=true`; `attached_params` modifies attached orders
 - `cancel_order(ctx, order_id)`: Cancel an order
 - `estimate_max_purchase_quantity(ctx, ::EstimateMaxPurchaseQuantityOptions)`: Estimate max purchase quantity
 - `cash_flow(ctx; start_at, end_at)`: Get cash flow records

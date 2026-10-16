@@ -8,7 +8,7 @@ using ProtoBuf: OneOf
 using EnumX
 using Dates
 using JSON
-using JSON.StructUtils: @nonstruct
+using JSON.StructUtils: @nonstruct, @kwarg
 using Printf
 using ..QuoteProtocol: SecurityBoard
 using ..Constant
@@ -30,6 +30,10 @@ export Command,
     Execution,
     OrderSide,
     OrderTag,
+    AttachedOrderType,
+    AttachedOrderDetail,
+    SubmitAttachedParams,
+    ReplaceAttachedParams,
     MultiLegStrategy,
     MultiLegPosition,
     ContractDirection,
@@ -533,6 +537,105 @@ function JSON.lift(::Type{OutsideRTH.T}, value::AbstractString)
 end
 JSON.lift(::Type{OutsideRTH.T}, value::Symbol) = JSON.lift(OutsideRTH.T, String(value))
 
+"""Attached take-profit / stop-loss order type (wire values are strings)."""
+@enumx AttachedOrderType begin
+    Unknown = 0
+    ProfitTaker = 1
+    StopLoss = 2
+    Bracket = 3
+end
+
+function JSON.lift(::Type{AttachedOrderType.T}, value::AbstractString)
+    value == "PROFIT_TAKER" && return AttachedOrderType.ProfitTaker
+    value == "STOP_LOSS" && return AttachedOrderType.StopLoss
+    value == "BRACKET" && return AttachedOrderType.Bracket
+    return AttachedOrderType.Unknown
+end
+_attached_order_type_str(value::AttachedOrderType.T) =
+    value === AttachedOrderType.ProfitTaker ? "PROFIT_TAKER" :
+    value === AttachedOrderType.StopLoss ? "STOP_LOSS" :
+    value === AttachedOrderType.Bracket ? "BRACKET" : "Unknown"
+
+# Match upstream's lenient optional i32 decoder, not Julia's float/bool coercions.
+function _attached_depth_level(value)
+    value isa Bool && return nothing
+    n = value isa Integer ? value :
+        value isa AbstractString ? tryparse(Int64, strip(value)) : nothing
+    (isnothing(n) || n == 0 || !(typemin(Int32) <= n <= typemax(Int32))) && return nothing
+    return Int32(n)
+end
+
+"""
+Attached order returned by order queries. Prices/quantities use `Dec64`;
+`updated_at` and `submitted_at` use UTC+8, like other trade readback timestamps.
+`limit_depth_level` is unset for missing, null, zero or invalid int32 values.
+"""
+@nonstruct struct AttachedOrderDetail
+    order_id::String
+    attached_type_display::AttachedOrderType.T
+    trigger_price::Union{Dec64,Nothing}
+    quantity::Dec64
+    executed_qty::Dec64
+    status::OrderStatus.T
+    updated_at::DateTime
+    withdrawn::Bool
+    gtd::Union{Date,Nothing}
+    time_in_force::TimeInForceType.T
+    counter_id::String
+    trigger_status::Union{TriggerStatus.T,Nothing}
+    executed_amount::Dec64
+    tag::OrderTag.T
+    submitted_at::DateTime
+    executed_price::Union{Dec64,Nothing}
+    force_only_rth::Union{OutsideRTH.T,Nothing}
+    reviewed::Bool
+    activate_order_type::OrderType.T
+    activate_rth::Union{OutsideRTH.T,Nothing}
+    submit_price::Union{Dec64,Nothing}
+    limit_depth_level::Union{Int32,Nothing}
+end
+
+_attached_optional_rth(v) =
+    isnothing(v) || v == "UnknownOutsideRth" ? nothing : JSON.lift(OutsideRTH.T, v)
+
+function JSON.lift(::Type{AttachedOrderDetail}, obj::AbstractDict)
+    gtd = get(obj, "gtd", nothing)
+    trigger = get(obj, "trigger_status", nothing)
+    trigger_status = isnothing(trigger) || trigger == "NOT_USED" ? nothing :
+        trigger == "DEACTIVE" ? TriggerStatus.Deactive :
+        trigger == "ACTIVE" ? TriggerStatus.Active :
+        trigger == "RELEASED" ? TriggerStatus.Released : TriggerStatus.NOT_USED
+    AttachedOrderDetail(
+        String(obj["order_id"]),
+        JSON.lift(AttachedOrderType.T, obj["attached_type_display"]),
+        Utils._parse_optional_decimal(get(obj, "trigger_price", nothing)),
+        safeparse(Dec64, obj["quantity"]),
+        safeparse(Dec64, obj["executed_qty"]),
+        JSON.lift(OrderStatus.T, obj["status"]),
+        to_china_time(obj["updated_at"]),
+        obj["withdrawn"],
+        isnothing(gtd) || isempty(gtd) ? nothing : Date(gtd),
+        JSON.lift(TimeInForceType.T, obj["time_in_force"]),
+        String(obj["counter_id"]),
+        trigger_status,
+        safeparse(Dec64, obj["executed_amount"]),
+        JSON.lift(OrderTag.T, obj["tag"]),
+        to_china_time(obj["submitted_at"]),
+        Utils._parse_optional_decimal(get(obj, "executed_price", nothing)),
+        _attached_optional_rth(get(obj, "force_only_rth", nothing)),
+        obj["reviewed"],
+        JSON.lift(OrderType.T, obj["activate_order_type"]),
+        _attached_optional_rth(get(obj, "activate_rth", nothing)),
+        Utils._parse_optional_decimal(get(obj, "submit_price", nothing)),
+        _attached_depth_level(get(obj, "limit_depth_level", nothing)),
+    )
+end
+construct(::Type{AttachedOrderDetail}, obj::JSONObject) = JSON.lift(AttachedOrderDetail, obj)
+
+JSON.lower(detail::AttachedOrderDetail) = NamedTuple{fieldnames(AttachedOrderDetail)}(Tuple(
+    getfield(detail, field) for field in fieldnames(AttachedOrderDetail)
+))
+
 """
 Commission free status
 """
@@ -660,7 +763,7 @@ end
 """
 Order information
 """
-struct Order
+@kwarg struct Order
     order_id::String
     status::OrderStatus.T
     stock_name::String
@@ -689,6 +792,7 @@ struct Order
     remark::String
     multi_leg::Union{MultiLegInfo,Nothing}
     delayed_until::Union{DateTime,Nothing} # UTC+8, like submitted_at
+    attached_orders::Vector{AttachedOrderDetail} = AttachedOrderDetail[]
 end
 
 
@@ -790,7 +894,7 @@ end
 """
 Order detail
 """
-struct OrderDetail
+@kwarg struct OrderDetail
     order_id::String
     status::OrderStatus.T
     stock_name::String
@@ -830,6 +934,7 @@ struct OrderDetail
     charge_detail::OrderChargeDetail
     multi_leg::Union{MultiLegInfo,Nothing}
     delayed_until::Union{DateTime,Nothing} # UTC+8, like submitted_at
+    attached_orders::Vector{AttachedOrderDetail} = AttachedOrderDetail[]
 end
 
 function Base.show(io::IO, d::OrderDetail)
@@ -1236,6 +1341,52 @@ end
 
 # --- Request Option Structs ---
 
+"""
+Attached take-profit / stop-loss parameters for `SubmitOrderOptions.attached_params`.
+`expire_time` is Unix seconds. The optional int32 `profit_taker_depth_level` /
+`stop_loss_depth_level` select the bid/ask level for the submitted limit price
+when `activate_order_type == OrderType.LIT`. Business validation is server-side.
+"""
+Base.@kwdef struct SubmitAttachedParams
+    attached_order_type::AttachedOrderType.T
+    profit_taker_price::Union{Dec64,Nothing} = nothing
+    stop_loss_price::Union{Dec64,Nothing} = nothing
+    time_in_force::Union{TimeInForceType.T,Nothing} = nothing
+    expire_time::Union{Int64,Nothing} = nothing
+    activate_order_type::Union{OrderType.T,Nothing} = nothing
+    profit_taker_submit_price::Union{Dec64,Nothing} = nothing
+    stop_loss_submit_price::Union{Dec64,Nothing} = nothing
+    activate_rth::Union{OutsideRTH.T,Nothing} = nothing
+    profit_taker_depth_level::Union{Int32,Nothing} = nothing
+    stop_loss_depth_level::Union{Int32,Nothing} = nothing
+end
+
+"""
+Attached parameters for `ReplaceOrderOptions.attached_params`. In addition to the
+submit fields, accepts attached-order IDs, `cancel_all_attached`, `main_id`,
+`quantity` and `market_price`. Omitted fields are not sent; explicit false/zero
+are preserved. `expire_time` is Unix seconds; depth levels apply to LIT orders.
+"""
+Base.@kwdef struct ReplaceAttachedParams
+    attached_order_type::AttachedOrderType.T
+    profit_taker_price::Union{Dec64,Nothing} = nothing
+    stop_loss_price::Union{Dec64,Nothing} = nothing
+    time_in_force::Union{TimeInForceType.T,Nothing} = nothing
+    expire_time::Union{Int64,Nothing} = nothing
+    activate_order_type::Union{OrderType.T,Nothing} = nothing
+    profit_taker_submit_price::Union{Dec64,Nothing} = nothing
+    stop_loss_submit_price::Union{Dec64,Nothing} = nothing
+    activate_rth::Union{OutsideRTH.T,Nothing} = nothing
+    profit_taker_id::Union{Int64,Nothing} = nothing
+    stop_loss_id::Union{Int64,Nothing} = nothing
+    cancel_all_attached::Union{Bool,Nothing} = nothing
+    main_id::Union{Int64,Nothing} = nothing
+    quantity::Union{Dec64,Nothing} = nothing
+    market_price::Union{Dec64,Nothing} = nothing
+    profit_taker_depth_level::Union{Int32,Nothing} = nothing
+    stop_loss_depth_level::Union{Int32,Nothing} = nothing
+end
+
 """提交组合订单的一条腿：`symbol` + 正数 `ratio_quantity`。方向由 `strategy` 与订单 `side` 隐含决定，不看比例正负。"""
 Base.@kwdef struct SubmitMultiLegOrderLeg
     symbol::String
@@ -1264,7 +1415,8 @@ end
 """
 Submit an order. `delayed_until` is a UTC `DateTime`, later than now and at most
 90 days ahead (validated by the server). Until then the order remains in
-`DelayedNotReported`. Omit it for a regular order.
+`DelayedNotReported`. Omit it for a regular order. Optional `attached_params`
+configures take-profit / stop-loss orders via `SubmitAttachedParams`.
 """
 Base.@kwdef struct SubmitOrderOptions
     symbol::String
@@ -1286,12 +1438,14 @@ Base.@kwdef struct SubmitOrderOptions
     monitor_price::Union{Float64,Nothing} = nothing
     client_request_id::Union{String,Nothing} = nothing
     delayed_until::Union{DateTime,Nothing} = nothing
+    attached_params::Union{SubmitAttachedParams,Nothing} = nothing
 end
 
 """
 Replace an order. `delayed_until` moves the submit time (UTC `DateTime`, later
 than now and at most 90 days ahead). `clear_delayed_until=true` takes precedence
 and turns it into a regular order. Leaving both unset preserves the condition.
+Optional `attached_params::ReplaceAttachedParams` modifies attached orders.
 """
 Base.@kwdef struct ReplaceOrderOptions
     order_id::String
@@ -1299,6 +1453,7 @@ Base.@kwdef struct ReplaceOrderOptions
     submitted_price::Union{Float64,Nothing} = nothing
     delayed_until::Union{DateTime,Nothing} = nothing
     clear_delayed_until::Bool = false
+    attached_params::Union{ReplaceAttachedParams,Nothing} = nothing
 end
 
 Base.@kwdef struct GetHistoryExecutionsOptions

@@ -6,21 +6,19 @@
 ## 更新日志
 详细更新说明请见 [NEWS.md](NEWS.md)。
 
-最新版本：**v0.12.0** —— 同步上游 openapi v5.2.1：时间条件单与 HTTP 行情传输。
+最新版本：**v0.13.0** —— 同步上游 openapi v5.2.2：附加止盈/止损单盘口档位。
 
-### v0.12.0 更新要点
+### v0.13.0 更新要点
 
-- **HTTP 行情拉取：** 使用 `Config.from_oauth(oauth; quote_transport=QuoteTransport.Http)` 或 `Config.Settings(...; quote_transport=QuoteTransport.Http)`。也可在创建配置前设置环境变量 `LONGBRIDGE_QUOTE_TRANSPORT=http`，或在 TOML 中添加 `quote_transport = "http"`。默认仍是 `ws`，显式配置优先于环境变量。仅拉取行情不会建立 WebSocket；订阅和账户行情档位查询按需连接，`realtime_*` 仍读本地推送缓存。HTTP 同样遵守 `enable_overnight=false`（也支持从 TOML 读取），过滤夜盘 K 线后会有限分页补齐。
-- **时间条件单：** 在 `SubmitOrderOptions` / `SubmitMultiLegOrderOptions` 中传入 `delayed_until=now(Dates.UTC)+Hour(1)`。服务端在此之前保持 `OrderStatus.DelayedNotReported`，到时自动提交。时间必须晚于当前时间且不超过 90 天，多腿时间条件单仅支持 LO / MO；与上游一致，由服务端校验这些限制。
-- **改单与回读：** 用 `ReplaceOrderOptions.delayed_until` 修改时间，或 `clear_delayed_until=true` 清除时间条件（同时设置时清除优先）；均不设置则保留原条件。通过 `order_detail(ctx, id).delayed_until` 或订单列表的 `Delayed Until` 列读取。请求的 `DateTime` 使用 **UTC**；回读沿用现有交易时间惯例，使用 **UTC+8**，未设置时为 `nothing`。
+- 新增 `AttachedOrderType`、`SubmitAttachedParams`、`ReplaceAttachedParams` 和 `AttachedOrderDetail`，补齐附加单基础模型。在下单/改单选项中通过 `attached_params` 设置。
+- 新增可选的 `profit_taker_depth_level` / `stop_loss_depth_level`（Int32），指定止盈/止损限价单委托价使用的买卖盘口档位，适用于 `activate_order_type = OrderType.LIT`；业务限制由服务端校验。
+- `order_detail(...).attached_orders` 及今日/历史订单的 `Attached Orders` 列返回类型化附加单。回读的 `limit_depth_level` 对缺失、null、零、非法及越界值返回 `nothing`，支持整数和整数字符串。
 
-HTTP 网关的错误码和数据可能与 WebSocket 不同；传输限制、测试覆盖及历史版本说明见 [NEWS.md](NEWS.md)。
+### v0.13.0 迁移说明
 
-### v0.12.0 迁移说明
-
-- 原有关键字形式的订单选项仍然可用。若使用位置参数构造订单选项、`Order` 或 `OrderDetail`，需补上新增的尾部字段（未设置时用 `nothing` / `false`）。
-- 订单列表 DataFrame 追加 `Delayed Until` 列；状态处理需识别 `DelayedNotReported`。清除时间条件**不是撤单**，恢复普通单后可能立即报送。回读的 UTC+8 时间如需复用于 UTC 请求，应先减去 `Hour(8)`。
-- HTTP.jl 最低版本提升到 **2.8**，仍限定在主版本 2 内。行情默认继续使用 WebSocket；`QuoteTransport` 不影响交易传输。
+- 原有关键字构造方式不变；不传 `attached_params` 时请求体不变。位置参数构造 `SubmitOrderOptions` / `ReplaceOrderOptions` 需追加 `nothing`；`Order` / `OrderDetail` 需追加 `AttachedOrderDetail[]`。
+- 订单列表追加 `Attached Orders` 列；旧响应未提供附加单或返回 null 时得到空数组。附加单价格/数量使用 `Dec64`，回读时间使用 UTC+8；请求中的 `expire_time` 为 Unix 秒。
+- 上游 Node.js/Python 二进制构建与发布修复不涉及原生 Julia 实现。历史更新与测试范围见 [NEWS.md](NEWS.md)。
 
 参考文档：
 
@@ -274,6 +272,46 @@ options = SubmitOrderOptions(
 再在 `SubmitMultiLegOrderOptions` 中传入 `delayed_until`。多腿时间条件单仅支持 `LO` / `MO`；
 请选择有效且未到期的合约。所有时间条件均要求晚于当前时间且不超过 90 天，由服务端校验。
 
+### 附加止盈/止损单
+
+仅构造选项不会发送请求；以下写操作默认注释，使用前请核对账户、价格、数量、
+订单 ID 与交易时段。盘口档位仅适用于 LIT，由服务端校验。
+
+```julia
+using LongBridge
+using DecFP: Dec64
+
+attached = SubmitAttachedParams(
+    attached_order_type = AttachedOrderType.Bracket,
+    profit_taker_price = Dec64("330"), stop_loss_price = Dec64("280"),
+    activate_order_type = OrderType.LIT,
+    profit_taker_depth_level = 2, stop_loss_depth_level = 5,
+)
+options = SubmitOrderOptions(
+    symbol = "700.HK", order_type = OrderType.LO, side = OrderSide.Buy,
+    submitted_quantity = 100, time_in_force = TimeInForceType.Day,
+    submitted_price = 300.0, attached_params = attached,
+)
+# submit_order(trade_ctx, options)
+
+replacement = ReplaceOrderOptions(
+    order_id = "<order-id>", submitted_quantity = 100,
+    attached_params = ReplaceAttachedParams(
+        attached_order_type = AttachedOrderType.Bracket,
+        activate_order_type = OrderType.LIT,
+        profit_taker_depth_level = 3, stop_loss_depth_level = 5,
+    ),
+)
+# replace_order(trade_ctx, replacement)
+# detail = order_detail(trade_ctx, "<order-id>")
+# detail.attached_orders  # Vector{AttachedOrderDetail}
+# today_orders(trade_ctx)[!, "Attached Orders"]
+```
+
+修改已有附加单可设置 `profit_taker_id` / `stop_loss_id`（Int64）。
+`cancel_all_attached=true` 会请求取消全部附加单；不传该字段不等于取消。
+可选字段未设置时不发送，显式的零/false 会保留；`expire_time` 使用 Unix 秒。
+
 ### 实时行情订阅
 
 ```julia
@@ -364,10 +402,10 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `today_executions(ctx; symbol)`: 获取今日成交
 - `history_executions(ctx; symbol, start_at, end_at)`: 获取全部历史成交（自动翻页，返回 `Vector{Execution}`）
 - `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: 获取所有成交（`AllExecutionsResponse`）
-- `order_detail(ctx, order_id)`: 获取订单详情（组合订单含 `multi_leg`，时间条件单含可选的 `delayed_until`）
-- `submit_order(ctx, ::SubmitOrderOptions)`: 下单；可选 `delayed_until` 指定服务端自动提交时间
+- `order_detail(ctx, order_id)`: 获取订单详情（含 `multi_leg`、可选的 `delayed_until` 及 `attached_orders`）
+- `submit_order(ctx, ::SubmitOrderOptions)`: 下单；可选 `delayed_until` 指定自动提交时间，`attached_params` 配置附加单
 - `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: 提交多腿期权组合订单；时间条件仅支持 LO / MO
-- `replace_order(ctx, ::ReplaceOrderOptions)`: 修改订单；用 `delayed_until` 调整时间，或 `clear_delayed_until=true` 清除时间条件
+- `replace_order(ctx, ::ReplaceOrderOptions)`: 修改订单；用 `delayed_until` 调整时间，或 `clear_delayed_until=true` 清除时间条件；`attached_params` 修改附加单
 - `cancel_order(ctx, order_id)`: 撤单
 - `estimate_max_purchase_quantity(ctx, ::EstimateMaxPurchaseQuantityOptions)`: 预估最大购买数量
 - `cash_flow(ctx; start_at, end_at)`: 获取资金流水

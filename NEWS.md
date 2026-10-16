@@ -1,5 +1,28 @@
 # Release Notes
 
+## v0.13.0 (2026-10-16)
+
+Syncs `longbridge/openapi` v5.2.2 (`b1e69746`), including attached-order depth levels (#607).
+
+### New features
+
+- Adds the previously missing prerequisite attached-order API: `AttachedOrderType.{Unknown,ProfitTaker,StopLoss,Bracket}`, `SubmitAttachedParams`, `ReplaceAttachedParams`, and `AttachedOrderDetail`. Submit/replace options accept optional `attached_params`; existing requests are unchanged when it is omitted.
+- Both attached-parameter structs expose optional `profit_taker_depth_level` / `stop_loss_depth_level` as Int32. They select the bid/ask level for the take-profit / stop-loss limit order's submitted price when `activate_order_type` is LIT. Business restrictions remain server-validated, as upstream.
+- Attached parameters include trigger/limit prices, time in force, Unix-second expiry and RTH settings. Replacement additionally supports attached/main IDs, cancellation, quantity and market price. Nested enums and decimals use upstream wire strings; IDs, depth levels and booleans stay JSON primitives. Unset fields are omitted, not serialized as null; explicit zero/false are preserved.
+- `Order` / `OrderDetail` expose `attached_orders::Vector{AttachedOrderDetail}`; today/history order-list DataFrames append `Attached Orders`. Missing/null collections become empty vectors. Attached-order prices/quantities use Dec64 and timestamps follow existing trade UTC+8 readback semantics.
+- `AttachedOrderDetail.limit_depth_level` accepts signed integers and trimmed integer strings within Int32 range. Missing, null, zero, malformed, boolean, floating-point and out-of-range values become `nothing` without failing the response.
+
+### Compatibility and scope
+
+- Keyword construction remains compatible. Positional `SubmitOrderOptions` / `ReplaceOrderOptions` constructors need a trailing `nothing`; `Order` / `OrderDetail` need a trailing `AttachedOrderDetail[]`. Direct typed JSON parsing of older orders retains a default empty attached-order vector.
+- This native Julia SDK does not use the upstream C ABI. Header rebuild/zero-initialization requirements and the Node.js/Python glibc baseline / publishing fixes (#608–#609), plus Java publishing-plugin update (#606), require no Julia changes.
+- Both READMEs document the latest release, migration notes and safe submit/replace/readback examples; write calls remain commented out. The gitignored local `trade_test.jl` also demonstrates attached-order submission, depth replacement, cancellation and readback; `quote_test.jl` needs no v5.2.2-specific change.
+
+### Tests
+
+- Adds `test/test_v5_2_2_sync.jl` covering exports, enum wire mappings, optional fields, decimal/ID serialization, Int32 boundaries, delayed-order coexistence and all three order-query endpoints. Tests use fake credentials and loopback HTTP only; no live authentication or trading calls are made.
+- Validation: `julia --project=. --startup-file=no test/runtests.jl` passes all 2,219 assertions (including 463 new checks); 28 additional checks validate README syntax and execute the offline attached-order option examples. Another 23 offline checks validate both local interactive scripts, ensure write calls remain commented out, and capture the new trade examples' options with local stubs. `git diff --check` passes.
+
 ## v0.12.0 (2026-10-15)
 
 Syncs `longbridge/openapi` v5.2.1 (`9940c786`), including #595 and #604.

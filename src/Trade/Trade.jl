@@ -11,7 +11,7 @@ using ..Errors
 using ..TradePush
 using ..TradeProtocol
 using ..USProtocol
-using ..Utils: construct, to_china_time, safeparse, symbol_to_counter_id
+using ..Utils: construct, to_china_time, safeparse, symbol_to_counter_id, Dec64
 using ..Commands:
     AbstractCommand, HttpGetCmd, HttpPostCmd, HttpPutCmd, HttpDeleteCmd, DisconnectCmd
 
@@ -406,6 +406,8 @@ function to_dict(opts)
             key = string(name)
             if name === :delayed_until
                 d[key] = _delayed_until_timestamp(val)
+            elseif val isa Union{SubmitAttachedParams,ReplaceAttachedParams}
+                d[key] = to_dict(val)
             elseif val isa Date || val isa DateTime
                 d[key] = string(round(Int, datetime2unix(DateTime(val))))
             elseif val isa Vector && !isempty(val)
@@ -425,6 +427,20 @@ function to_dict(opts)
         d["delayed_until"] = 1
     end
     d
+end
+
+# Nested attached parameters use upstream string enums/decimals, unlike the
+# legacy top-level order serializer. Integers and booleans stay JSON primitives.
+function to_dict(opts::Union{SubmitAttachedParams,ReplaceAttachedParams})
+    d = Dict{String,Any}()
+    for name in fieldnames(typeof(opts))
+        val = getfield(opts, name)
+        isnothing(val) && continue
+        d[string(name)] = val isa AttachedOrderType.T ? TradeProtocol._attached_order_type_str(val) :
+            val isa OutsideRTH.T ? _outside_rth_str(val) :
+            val isa Enum || val isa Dec64 ? string(val) : val
+    end
+    return d
 end
 
 # 0 = no condition, 1 = clear. Never let an early date silently submit a regular
@@ -468,6 +484,7 @@ function _parse_order_data(o)
     d["limit_offset"] = safeparse(Float64, d["limit_offset"])
     d["multi_leg"] = _parse_multi_leg(get(d, "multi_leg", nothing))
     d["delayed_until"] = _parse_delayed_until(get(d, "delayed_until", nothing))
+    d["attached_orders"] = something(get(d, "attached_orders", nothing), [])
     return d
 end
 
@@ -506,6 +523,7 @@ function _orders_to_dataframe(orders::AbstractVector{Order})
         "Price" => [o.price for o in orders],
         "Submitted At" => [o.submitted_at for o in orders],
         "Delayed Until" => [o.delayed_until for o in orders],
+        "Attached Orders" => [o.attached_orders for o in orders],
     )
 end
 
@@ -852,6 +870,7 @@ function order_detail(ctx::TradeContext, order_id::AbstractString)
 
         d["multi_leg"] = _parse_multi_leg(get(d, "multi_leg", nothing))
         d["delayed_until"] = _parse_delayed_until(get(d, "delayed_until", nothing))
+        d["attached_orders"] = something(get(d, "attached_orders", nothing), [])
 
         return JSON.parse(JSON.json(d), OrderDetail)
     else
