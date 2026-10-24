@@ -59,6 +59,9 @@ include("test_quote_http_overnight.jl")
 # v0.13.0 / upstream v5.2.2: attached order depth levels.
 include("test_v5_2_2_sync.jl")
 
+# v0.14.0 / upstream v5.3.0: option chains, US assets and data-center restrictions.
+include("test_v5_3_0_sync.jl")
+
 # JSON3.jl -> JSON.jl 1.0 迁移：解析/构造行为回归
 include("test_json_migration.jl")
 

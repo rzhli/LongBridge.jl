@@ -6,19 +6,21 @@ This is an unofficial SDK, currently for personal use only. Some functions in th
 ## Release Notes
 See [NEWS.md](NEWS.md) for detailed release notes.
 
-Latest release: **v0.13.0** — sync with upstream openapi v5.2.2: attached take-profit / stop-loss depth levels.
+Latest release: **v0.14.0** — sync with upstream openapi v5.3.0: option-chain fixes, US assets and data-center restrictions.
 
-### v0.13.0 highlights
+### v0.14.0 highlights
 
-- Adds `AttachedOrderType`, `SubmitAttachedParams`, `ReplaceAttachedParams` and `AttachedOrderDetail`, completing the prerequisite attached-order models. Pass `attached_params` in submit/replace options.
-- Optional `profit_taker_depth_level` / `stop_loss_depth_level` (Int32) select the bid/ask level for the take-profit / stop-loss limit order's submitted price when `activate_order_type = OrderType.LIT`. Business restrictions are validated by the server.
-- `order_detail(...).attached_orders` and the `Attached Orders` column in today/history order lists expose typed attached orders. Readback `limit_depth_level` accepts integers or integer strings; missing, null, zero, invalid and out-of-range values become `nothing`.
+- `option_chain_info_by_date` now uses `POST /v1/quote/options/strikes`, fixing the old endpoint's `404000`; its signature and return type are unchanged.
+- Adds US cash/buying power, available holdings, transaction history and exchange rates with typed options/responses. Crypto holdings now retain quantity, prices, P&L and position side.
+- Missing/null execution `side` defaults to `OrderSide.UnknownSide`; fractional US executions are supported.
+- Eight AP-only queries reject US credentials before sending the API request and name alternatives. Regions refer to account credentials, independent of the security's market.
 
-### v0.13.0 migration notes
+### v0.14.0 migration notes
 
-- Existing keyword constructors are unchanged; omitting `attached_params` preserves the request body. Positional constructors for `SubmitOrderOptions` / `ReplaceOrderOptions` need a trailing `nothing`; `Order` / `OrderDetail` need a trailing `AttachedOrderDetail[]`.
-- Order-list DataFrames append `Attached Orders`; absent/null collections in older responses become empty vectors. Attached-order prices/quantities use `Dec64` and readback timestamps use UTC+8; request `expire_time` is Unix seconds.
-- Upstream Node.js/Python binary build and publishing fixes do not apply to the native Julia implementation. See [NEWS.md](NEWS.md) for historical changes and test coverage.
+- `Execution.quantity` and `Execution.price` now use `Dec64`; adjust code expecting `Int64` / `Float64`. Unix-second execution timestamps follow the trade module's UTC+8 convention; existing ISO DateTime input is preserved.
+- `USCryptoEntry.symbol` remains a full symbol such as `BTCUSD.BKKT`; legacy `counter_id`, keyword construction and the original five-argument constructor remain supported.
+- New `USTransaction.create_at` / `done_at` are UTC `DateTime` or `nothing`. Request bounds are also UTC. Transaction history returns one page, with no total count.
+- Region errors retain `LongBridgeError(403, ...)` and the old message prefix, appending alternative endpoints. Historical changes and attached-order migration notes are in [NEWS.md](NEWS.md).
 
 References:
 
@@ -238,6 +240,42 @@ resp = cancel_order(ctx, "709043056541253632")
 disconnect!(ctx)
 ```
 
+### US Assets and Region Restrictions
+
+AP / US identify the credentials' data center. AP accounts trading US stocks still use AP methods; US accounts use the alternatives below.
+
+| AP-only query | US-account alternative |
+| --- | --- |
+| `account_balance` | `us_cash_and_buy_power` / `us_asset_overview` |
+| `cash_flow` | `us_transaction_history` |
+| `stock_positions` | `us_asset_overview(...).stock_list` |
+| `fund_positions(::TradeContext)` | No equivalent |
+| `margin_ratio` | No per-security equivalent; account margin is in `us_cash_and_buy_power(...).margin_status` |
+| `all_executions` | `history_executions` |
+| `order_detail` | `us_order_detail` |
+| `exchange_rate(::PortfolioContext)` | `us_exchange_rates(::TradeContext)` |
+
+Read-only examples, with `us_cfg` created from US credentials:
+
+```julia
+using LongBridge, Dates
+
+us_ctx = TradeContext(us_cfg)
+cash = us_cash_and_buy_power(us_ctx; currency="USD")
+holding = us_available_holding(us_ctx, GetUSAvailableHoldingOptions(
+    symbol="BTCUSD.BKKT", equity_type="CRYPTO", position_side="LONG"))
+page = us_transaction_history(us_ctx, GetUSTransactionHistoryOptions(
+    start_at=DateTime(2026, 10, 1), end_at=DateTime(2026, 10, 24),
+    page=1, size=20, types=["TT_CRYPTO_TRADING"], currency="USD"))
+rates = us_exchange_rates(us_ctx).exchanges
+close(us_ctx)
+```
+
+Amounts and holding quantities remain strings to preserve backend precision; `available_qty` can be negative for shorts.
+Empty `equity_type` / `position_side` use `STOCK` / `LONG`; nonpositive transaction `page` / `size` use 1 / 20, and empty filters are omitted.
+A page shorter than the requested size is the last page. Transaction timestamps are UTC; missing/invalid times become `nothing`.
+Exchange rates retain both map keys and are ordered by `universal_key` / `spec_key`; numeric rates become strings, and absent rates become `""`.
+
 ### Time-condition Orders
 
 Constructing options does not place an order. The write calls below are commented
@@ -401,25 +439,36 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `update_watchlist_group(ctx, group_id; name, securities, mode)`: Update a watchlist group
 
 ### Trading
-- `account_balance(ctx)`: Get account balance
-- `stock_positions(ctx; symbol)`: Get stock positions (optional symbol filter)
-- `fund_positions(ctx)`: Get fund positions
+
+- `account_balance(ctx)`: Get account balance (AP only)
+- `stock_positions(ctx; symbol)`: Get stock positions (AP only; optional symbol filter)
+- `fund_positions(ctx)`: Get fund positions (AP only)
 - `today_orders(ctx; symbol, status, side)`: Get today's orders
 - `history_orders(ctx; symbol, status, side, start_at, end_at)`: Get historical orders
 - `today_executions(ctx; symbol)`: Get today's executions
 - `history_executions(ctx; symbol, start_at, end_at)`: Get all historical executions (auto-paged, returns `Vector{Execution}`)
-- `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: Get all executions (`AllExecutionsResponse`)
-- `order_detail(ctx, order_id)`: Get order detail (includes `multi_leg`, optional `delayed_until` and `attached_orders`)
+- `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: Get all executions (AP only; `AllExecutionsResponse`)
+- `order_detail(ctx, order_id)`: Get order detail (AP only; includes `multi_leg`, optional `delayed_until` and `attached_orders`)
 - `submit_order(ctx, ::SubmitOrderOptions)`: Submit an order; optional `delayed_until` schedules submission and `attached_params` configures attached orders
 - `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: Submit a multi-leg option combination order; time conditions require LO / MO
 - `replace_order(ctx, ::ReplaceOrderOptions)`: Modify an order; reschedule with `delayed_until` or clear it with `clear_delayed_until=true`; `attached_params` modifies attached orders
 - `cancel_order(ctx, order_id)`: Cancel an order
 - `estimate_max_purchase_quantity(ctx, ::EstimateMaxPurchaseQuantityOptions)`: Estimate max purchase quantity
-- `cash_flow(ctx; start_at, end_at)`: Get cash flow records
-- `margin_ratio(ctx, symbol)`: Get margin ratio for a security
+- `cash_flow(ctx; start_at, end_at)`: Get cash flow records (AP only)
+- `margin_ratio(ctx, symbol)`: Get margin ratio for a security (AP only)
 - `set_on_order_changed(ctx, callback)`: Set the callback function for order status change pushes
 - `Trade.subscribe(ctx, topics::Vector{TopicType.T})`: Subscribe to trade pushes (e.g. `[TopicType.Private]`)
 - `Trade.unsubscribe(ctx, topics::Vector{TopicType.T})`: Unsubscribe from trade pushes
+
+### US Assets (`TradeContext`)
+
+These methods require US credentials. See [US Assets and Region Restrictions](#us-assets-and-region-restrictions) for AP alternatives and examples.
+
+- `us_asset_overview(ctx)`: Get the asset overview, including stock and crypto holdings
+- `us_cash_and_buy_power(ctx; currency)`: Get buying power, cash balances and account margin status (`USCashAndBuyPower`)
+- `us_available_holding(ctx, ::GetUSAvailableHoldingOptions)`: Get the quantity available to trade (`USAvailableHolding`)
+- `us_transaction_history(ctx, ::GetUSTransactionHistoryOptions)`: Get one transaction page with UTC timestamps (`USTransactionHistory`)
+- `us_exchange_rates(ctx)`: Get exchange rates, preserving and sorting both map keys (`USExchangeRates`)
 
 ### Fundamental Data (`FundamentalContext`)
 - `FundamentalContext(config)`: Create context (HTTP-only, no disconnect needed)
@@ -478,7 +527,8 @@ Optional settings use positional keyword-constructed option structs, as in the e
 The fund-channel holding type is `FundHoldingPosition` and its overview options are `FundPositionsOptions`. The existing trade holding remains `TradeProtocol.FundPosition`; `fund_positions(::TradeContext; symbol=...)` still uses its existing endpoint and filter. Submission requires `SubmitFundOrderOptions(counter_id=..., action="buy", currency="USD", amount="100.00")`; cancellation takes the returned numeric order ID. Commented order examples are in `trade_test.jl`.
 
 ### Portfolio Analytics (`PortfolioContext`)
-- `exchange_rate(ctx)`: Current rates for all supported currencies
+
+- `exchange_rate(ctx)`: Current rates for all supported currencies (AP only; US accounts use `us_exchange_rates(::TradeContext)`)
 - `profit_analysis(ctx; start, end_)`: Account P&L (summary + sublist parallel fan-out)
 - `profit_analysis_by_market(ctx; page, size, market, ...)`: Paginated by market
 - `profit_analysis_detail(ctx, symbol; ...)`: Per-security P&L breakdown

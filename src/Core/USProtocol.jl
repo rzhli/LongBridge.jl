@@ -47,6 +47,17 @@ export USRankTag,
     USRealizedPLMetric,
     USRealizedPLEntry,
     USRealizedPL,
+    GetUSAvailableHoldingOptions,
+    GetUSTransactionHistoryOptions,
+    USAvailableHolding,
+    USBuyLimitInfo,
+    USCashDetail,
+    USMarginStatus,
+    USCashAndBuyPower,
+    USTransaction,
+    USTransactionHistory,
+    USExchangeRate,
+    USExchangeRates,
     construct_us
 
 @kwarg mutable struct USRankTag
@@ -444,13 +455,34 @@ end
     total_cash::String = ""
 end
 
-@kwarg mutable struct USCryptoEntry
+"""Crypto holding. `symbol` remains the full Julia SDK symbol, e.g. `BTCUSD.BKKT`."""
+Base.@kwdef mutable struct USCryptoEntry
     asset_type::String = ""
     average_cost::String = ""
-    symbol::String = "" &(json = (name = "counter_id",),)
+    symbol::String = ""
     currency::String = ""
     industry_name::String = ""
+    quantity::String = ""
+    market::String = ""
+    trade_status::String = ""
+    prev_close::String = ""
+    last_done::String = ""
+    market_price::String = ""
+    pretrade_close::String = ""
+    stock_invest_of_today::String = ""
+    today_pl::String = ""
+    pretrade_stock_invest_of_today::String = ""
+    pretrade_today_pl::String = ""
+    night_last_done::String = ""
+    night_prev_close::String = ""
+    position_side::String = ""
+    open_position_time::String = ""
+    name::String = ""
+    industry_counter_id::String = ""
 end
+
+USCryptoEntry(asset_type, average_cost, symbol, currency, industry_name) =
+    USCryptoEntry(; asset_type, average_cost, symbol, currency, industry_name)
 
 @kwarg mutable struct USStockEntry
     symbol::String = ""
@@ -507,15 +539,197 @@ end
     realized_pl_list::Vector{USRealizedPLEntry} = USRealizedPLEntry[]
 end
 
-# All of the mutable structs above use `@kwarg` (StructUtils' `Base.@kwdef`
+# Most mutable structs above use `@kwarg` (StructUtils' `Base.@kwdef`
 # equivalent), so JSON.jl knows their field defaults and keyword constructor and
 # can materialize them directly from partial API payloads. No per-type trait
 # declaration is needed anymore.
 
+
+"""US holding query. Empty equity_type/position_side mean STOCK/LONG."""
+Base.@kwdef struct GetUSAvailableHoldingOptions
+    symbol::String
+    equity_type::String = "STOCK"
+    position_side::String = "LONG"
+end
+
+"""
+One page of US transactions between inclusive UTC DateTime bounds.
+Nonpositive page/size use 1/20. Empty types/currency omit the filters.
+Types: TT_DEPOSIT_AND_WITHDRAWAL, TT_STOCKS_AND_ETFS_TRADING,
+TT_OPTIONS_TRADING, TT_CRYPTO_TRADING, TT_CORPORATE_ACTION,
+TT_TRANSFER_IN_AND_OUT, TT_CRYPTO_TRANSFER, TT_MARGIN_FINANCING, TT_OTHER.
+"""
+Base.@kwdef struct GetUSTransactionHistoryOptions
+    start_at::DateTime
+    end_at::DateTime
+    page::Int32 = 1
+    size::Int32 = 20
+    types::Vector{String} = String[]
+    currency::String = ""
+end
+
+Base.@kwdef struct USAvailableHolding
+    available_qty::String = ""
+end
+
+Base.@kwdef struct USBuyLimitInfo
+    currency::String = ""
+    cash_buy_power::String = ""
+    overnight_buy_power::String = ""
+    day_trade_buy_power::String = ""
+    instant_buy_power::String = ""
+    intraday_margin_buy_power::String = ""
+    option_buy_power::String = ""
+    crypto_buy_power::String = ""
+    mme::String = ""
+end
+
+Base.@kwdef struct USCashDetail
+    currency::String = ""
+    total_amount::String = ""
+    available_cash::String = ""
+    withdraw_cash::String = ""
+    frozen_cash::String = ""
+    settled_cash::String = ""
+    outstanding::String = ""
+    external_amount::String = ""
+end
+
+Base.@kwdef struct USMarginStatus
+    currency::String = ""
+    nlv::String = ""
+    margin_equity::String = ""
+    margin_maintenance_excess::String = ""
+    mmr::String = ""
+    reg_t_excess::String = ""
+    sma::String = ""
+end
+
+Base.@kwdef struct USCashAndBuyPower
+    buy_limit_info::USBuyLimitInfo = USBuyLimitInfo()
+    cash_list::Vector{USCashDetail} = USCashDetail[]
+    margin_status::USMarginStatus = USMarginStatus()
+end
+
+Base.@kwdef struct USTransaction
+    title::String = ""
+    biz_code::String = ""
+    biz_code_name::String = ""
+    amount::String = ""
+    currency::String = ""
+    symbol::String = ""
+    market::String = ""
+    equity_type::String = ""
+    position_side::String = ""
+    quantity::String = ""
+    quantity_description::String = ""
+    ref_no::String = ""
+    remark::String = ""
+    create_at::Union{DateTime,Nothing} = nothing
+    done_at::Union{DateTime,Nothing} = nothing
+end
+
+Base.@kwdef struct USTransactionHistory
+    current_page::Int64 = 0
+    items::Vector{USTransaction} = USTransaction[]
+end
+
+Base.@kwdef struct USExchangeRate
+    universal_key::String = ""
+    spec_key::String = ""
+    base_currency::String = ""
+    other_currency::String = ""
+    bid_rate::String = ""
+    offer_rate::String = ""
+    average_rate::String = ""
+end
+
+Base.@kwdef struct USExchangeRates
+    exchanges::Vector{USExchangeRate} = USExchangeRate[]
+end
+
+# These responses need explicit null defaults and special wire conversions.
+const _USAssetResponse = Union{USCryptoEntry,USAvailableHolding,USBuyLimitInfo,
+    USCashDetail,USMarginStatus,USCashAndBuyPower,USTransaction,
+    USTransactionHistory,USExchangeRate,USExchangeRates}
+JSON.StructUtils.structlike(::Type{<:_USAssetResponse}) = false
+
+_asset_value(::Type{String}, value) = String(value)
+function _asset_value(::Type{Int64}, value)
+    value isa Bool && throw(ArgumentError("expected integer or integer string"))
+    value isa AbstractString && return something(tryparse(Int64, value), Int64(0))
+    value isa Integer || throw(ArgumentError("expected integer or integer string"))
+    return Int64(value)
+end
+function _asset_timestamp(value)
+    value isa Bool && return nothing
+    seconds = value isa Integer ? value :
+        value isa AbstractString ? tryparse(Int64, strip(value)) : nothing
+    # Rust OffsetDateTime's default maximum is year 9999.
+    (isnothing(seconds) || !(0 < seconds <= 253402300799)) && return nothing
+    return unix2datetime(seconds)
+end
+_asset_value(::Type{Union{DateTime,Nothing}}, value) = _asset_timestamp(value)
+_asset_value(::Type{T}, value) where {T<:_USAssetResponse} = JSON.lift(T, value)
+_asset_value(::Type{Vector{T}}, values) where {T<:_USAssetResponse} =
+    T[JSON.lift(T, value) for value in values]
+JSON.lift(::Type{T}, ::Nothing) where {T<:_USAssetResponse} = T()
+
+function JSON.lift(::Type{T}, obj::AbstractDict) where {T<:_USAssetResponse}
+    values = Pair{Symbol,Any}[]
+    for field in fieldnames(T)
+        value = get(obj, String(field), nothing)
+        isnothing(value) && continue
+        if T === USExchangeRate && field in (:bid_rate, :offer_rate, :average_rate)
+            # Upstream value_as_opt_string preserves strings and stringifies JSON values.
+            value = value isa AbstractString ? String(value) : JSON.json(value)
+        else
+            value = _asset_value(fieldtype(T, field), value)
+        end
+        push!(values, field => value)
+    end
+    result = T(; values...)
+    if T === USCryptoEntry
+        counter_id = get(obj, "counter_id", nothing)
+        if !isnothing(counter_id) && !isempty(counter_id)
+            result.symbol = counter_id_to_symbol(counter_id)
+        elseif !isempty(result.symbol) && !isempty(result.market) && !occursin('.', result.symbol)
+            result.symbol *= "." * result.market
+        end
+    end
+    return result
+end
+
+function JSON.lift(::Type{USExchangeRates}, obj::AbstractDict)
+    rates = _asset_value(Vector{USExchangeRate}, something(get(obj, "exchanges", nothing), []))
+    universal = something(get(obj, "universal_exchanges", nothing), Dict())
+    for universal_key in sort!(collect(keys(universal)))
+        specs = something(get(universal[universal_key], "spec_exchanges", nothing), Dict())
+        for spec_key in sort!(collect(keys(specs)))
+            rows = something(get(specs[spec_key], "exchanges", nothing), [])
+            for row in rows
+                entry = Dict{String,Any}(String(k) => v for (k, v) in row)
+                entry["universal_key"] = universal_key
+                entry["spec_key"] = spec_key
+                push!(rates, JSON.lift(USExchangeRate, entry))
+            end
+        end
+    end
+    return USExchangeRates(rates)
+end
+
+# Keep a round-trippable wire representation, with US DateTimes as UTC Unix seconds.
+function JSON.lower(value::_USAssetResponse)
+    Dict(String(field) => (getfield(value, field) isa DateTime ?
+         Int64(datetime2unix(getfield(value, field))) : getfield(value, field))
+         for field in fieldnames(typeof(value)))
+end
+construct(::Type{T}, obj::AbstractDict) where {T<:_USAssetResponse} = JSON.lift(T, obj)
+
 construct_us(::Type{T}, obj) where {T} = JSON.parse(JSON.json(obj), T)
 construct_us(::Type{USAssetOverview}, obj) = construct(USAssetOverview, obj)
 
-_get(obj, key::Symbol, default) = haskey(obj, key) ? obj[key] : default
+_get(obj, key::Symbol, default) = isnothing(get(obj, key, nothing)) ? default : obj[key]
 
 function _construct_vector(::Type{T}, values) where {T}
     isnothing(values) && return T[]
@@ -523,11 +737,7 @@ function _construct_vector(::Type{T}, values) where {T}
 end
 
 function _unix_datetime(value)
-    isnothing(value) && return nothing
-    text = String(value)
-    isempty(text) && return nothing
-    parsed = tryparse(Int64, text)
-    return isnothing(parsed) ? nothing : unix2datetime(parsed)
+    return _asset_timestamp(value)
 end
 
 function construct(::Type{USAssetOverview}, obj)

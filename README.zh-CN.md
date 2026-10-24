@@ -6,19 +6,21 @@
 ## 更新日志
 详细更新说明请见 [NEWS.md](NEWS.md)。
 
-最新版本：**v0.13.0** —— 同步上游 openapi v5.2.2：附加止盈/止损单盘口档位。
+最新版本：**v0.14.0** —— 同步上游 openapi v5.3.0：期权链修复、美区资产接口与数据中心限制。
 
-### v0.13.0 更新要点
+### v0.14.0 更新要点
 
-- 新增 `AttachedOrderType`、`SubmitAttachedParams`、`ReplaceAttachedParams` 和 `AttachedOrderDetail`，补齐附加单基础模型。在下单/改单选项中通过 `attached_params` 设置。
-- 新增可选的 `profit_taker_depth_level` / `stop_loss_depth_level`（Int32），指定止盈/止损限价单委托价使用的买卖盘口档位，适用于 `activate_order_type = OrderType.LIT`；业务限制由服务端校验。
-- `order_detail(...).attached_orders` 及今日/历史订单的 `Attached Orders` 列返回类型化附加单。回读的 `limit_depth_level` 对缺失、null、零、非法及越界值返回 `nothing`，支持整数和整数字符串。
+- `option_chain_info_by_date` 改用 `POST /v1/quote/options/strikes`，修复旧地址的 `404000`；签名和返回类型不变。
+- 新增美区资金/购买力、可交易持仓、资金流水和汇率接口，以及配套类型。加密资产持仓补齐数量、价格、盈亏和方向等字段。
+- 成交记录缺失或 null 的 `side` 返回 `OrderSide.UnknownSide`；支持美区小数成交数量。
+- 八个 AP 专属查询在 US 凭证下提前报区域错误，并提示替代接口；区域按账户凭证判断，与交易的股票市场无关。
 
-### v0.13.0 迁移说明
+### v0.14.0 迁移说明
 
-- 原有关键字构造方式不变；不传 `attached_params` 时请求体不变。位置参数构造 `SubmitOrderOptions` / `ReplaceOrderOptions` 需追加 `nothing`；`Order` / `OrderDetail` 需追加 `AttachedOrderDetail[]`。
-- 订单列表追加 `Attached Orders` 列；旧响应未提供附加单或返回 null 时得到空数组。附加单价格/数量使用 `Dec64`，回读时间使用 UTC+8；请求中的 `expire_time` 为 Unix 秒。
-- 上游 Node.js/Python 二进制构建与发布修复不涉及原生 Julia 实现。历史更新与测试范围见 [NEWS.md](NEWS.md)。
+- `Execution.quantity` 和 `Execution.price` 改为 `Dec64`；依赖原来 `Int64` / `Float64` 类型的调用方需调整。Unix 秒成交时间按交易模块惯例转为 UTC+8；已有 ISO DateTime 输入保持原值。
+- `USCryptoEntry.symbol` 保留完整代码（如 `BTCUSD.BKKT`），兼容旧 `counter_id`、关键字构造及原五参数构造。
+- 新增 `USTransaction.create_at` / `done_at` 为 UTC `DateTime` 或 `nothing`；请求起止时间同样为 UTC。流水按页返回，无总条数。
+- 区域错误保留 `LongBridgeError(403, ...)` 及原消息前缀，追加替代端点提示。旧版本更新及附加单迁移说明见 [NEWS.md](NEWS.md)。
 
 参考文档：
 
@@ -235,6 +237,42 @@ resp = cancel_order(ctx, "709043056541253632")
 disconnect!(ctx)
 ```
 
+### 美区资产与区域限制
+
+AP / US 指凭证的数据中心。AP 账户交易美股时仍使用 AP 接口；US 账户使用下表中的替代方法。
+
+| AP 专属查询 | US 账户替代方法 |
+| --- | --- |
+| `account_balance` | `us_cash_and_buy_power` / `us_asset_overview` |
+| `cash_flow` | `us_transaction_history` |
+| `stock_positions` | `us_asset_overview(...).stock_list` |
+| `fund_positions(::TradeContext)` | 无对应接口 |
+| `margin_ratio` | 无证券级对应接口；账户保证金见 `us_cash_and_buy_power(...).margin_status` |
+| `all_executions` | `history_executions` |
+| `order_detail` | `us_order_detail` |
+| `exchange_rate(::PortfolioContext)` | `us_exchange_rates(::TradeContext)` |
+
+以下为只读查询示例，`us_ctx` 使用 US 凭证创建：
+
+```julia
+using LongBridge, Dates
+
+us_ctx = TradeContext(us_cfg)
+cash = us_cash_and_buy_power(us_ctx; currency="USD")
+holding = us_available_holding(us_ctx, GetUSAvailableHoldingOptions(
+    symbol="BTCUSD.BKKT", equity_type="CRYPTO", position_side="LONG"))
+page = us_transaction_history(us_ctx, GetUSTransactionHistoryOptions(
+    start_at=DateTime(2026, 10, 1), end_at=DateTime(2026, 10, 24),
+    page=1, size=20, types=["TT_CRYPTO_TRADING"], currency="USD"))
+rates = us_exchange_rates(us_ctx).exchanges
+close(us_ctx)
+```
+
+金额和持仓数量以字符串保留服务端精度；`available_qty` 对空头可以为负。
+`equity_type` / `position_side` 的空字符串使用 `STOCK` / `LONG`；流水 `page` / `size` 非正数使用 1 / 20，空过滤条件不发送。
+`length(page.items)` 小于请求页大小时已到末页。流水时间为 UTC，非法或缺失时间返回 `nothing`。
+汇率按 `universal_key` / `spec_key` 排序并保留两层键；数字汇率转换为字符串，缺失值为 `""`。
+
 ### 时间条件单
 
 构造选项不会下单。下面的写操作均已注释；使用前请确认账户、价格、数量与交易时段，
@@ -394,25 +432,36 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `update_watchlist_group(ctx, group_id; name, securities, mode)`: 更新自选股分组
 
 ### 交易
-- `account_balance(ctx)`: 获取账户资金
-- `stock_positions(ctx; symbol)`: 获取持仓（symbol 可选过滤）
-- `fund_positions(ctx)`: 获取基金持仓
+
+- `account_balance(ctx)`: 获取账户资金（仅 AP）
+- `stock_positions(ctx; symbol)`: 获取持仓（仅 AP；symbol 可选过滤）
+- `fund_positions(ctx)`: 获取基金持仓（仅 AP）
 - `today_orders(ctx; symbol, status, side)`: 获取今日订单
 - `history_orders(ctx; symbol, status, side, start_at, end_at)`: 获取历史订单
 - `today_executions(ctx; symbol)`: 获取今日成交
 - `history_executions(ctx; symbol, start_at, end_at)`: 获取全部历史成交（自动翻页，返回 `Vector{Execution}`）
-- `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: 获取所有成交（`AllExecutionsResponse`）
-- `order_detail(ctx, order_id)`: 获取订单详情（含 `multi_leg`、可选的 `delayed_until` 及 `attached_orders`）
+- `all_executions(ctx; symbol, order_id, start_at, end_at, page)`: 获取所有成交（仅 AP；`AllExecutionsResponse`）
+- `order_detail(ctx, order_id)`: 获取订单详情（仅 AP；含 `multi_leg`、可选的 `delayed_until` 及 `attached_orders`）
 - `submit_order(ctx, ::SubmitOrderOptions)`: 下单；可选 `delayed_until` 指定自动提交时间，`attached_params` 配置附加单
 - `submit_multileg(ctx, ::SubmitMultiLegOrderOptions)`: 提交多腿期权组合订单；时间条件仅支持 LO / MO
 - `replace_order(ctx, ::ReplaceOrderOptions)`: 修改订单；用 `delayed_until` 调整时间，或 `clear_delayed_until=true` 清除时间条件；`attached_params` 修改附加单
 - `cancel_order(ctx, order_id)`: 撤单
 - `estimate_max_purchase_quantity(ctx, ::EstimateMaxPurchaseQuantityOptions)`: 预估最大购买数量
-- `cash_flow(ctx; start_at, end_at)`: 获取资金流水
-- `margin_ratio(ctx, symbol)`: 获取保证金比例
+- `cash_flow(ctx; start_at, end_at)`: 获取资金流水（仅 AP）
+- `margin_ratio(ctx, symbol)`: 获取保证金比例（仅 AP）
 - `set_on_order_changed(ctx, callback)`: 设置订单状态变化推送的回调函数
 - `Trade.subscribe(ctx, topics::Vector{TopicType.T})`: 订阅交易推送（如 `[TopicType.Private]`）
 - `Trade.unsubscribe(ctx, topics::Vector{TopicType.T})`: 取消订阅交易推送
+
+### 美区资产（TradeContext）
+
+以下方法需要 US 凭证；AP 对应方法与示例见[美区资产与区域限制](#美区资产与区域限制)。
+
+- `us_asset_overview(ctx)`: 获取资产概览，含股票与加密资产持仓
+- `us_cash_and_buy_power(ctx; currency)`: 获取购买力、各币种资金及账户保证金状态（`USCashAndBuyPower`）
+- `us_available_holding(ctx, ::GetUSAvailableHoldingOptions)`: 获取可交易数量（`USAvailableHolding`）
+- `us_transaction_history(ctx, ::GetUSTransactionHistoryOptions)`: 获取单页资金流水，时间为 UTC（`USTransactionHistory`）
+- `us_exchange_rates(ctx)`: 获取汇率，保留两层映射键并按键排序（`USExchangeRates`）
 
 ### 基本面（FundamentalContext）
 - `FundamentalContext(config)`: 创建上下文（HTTP-only，无需 disconnect）
@@ -482,8 +531,9 @@ orders = fund_orders(fund_ctx, GetFundOrdersOptions(page=1, size=20))
 新基金渠道的持仓项名为 `FundHoldingPosition`，持仓概览选项为 `FundPositionsOptions`，避免与原交易模块类型冲突。原 `fund_positions(::TradeContext; symbol=...)` 保留原端点及过滤条件，返回项仍为 `TradeProtocol.FundPosition`。申购参数示例：`SubmitFundOrderOptions(counter_id=..., action="buy", currency="USD", amount="100.00")`；撤单使用返回的数值订单 ID。`trade_test.jl` 中的下单示例默认注释。
 
 ### 组合分析（PortfolioContext）
+
 - `PortfolioContext(config)`: 创建上下文
-- `exchange_rate(ctx)`: 全部支持币种的汇率
+- `exchange_rate(ctx)`: 全部支持币种的汇率（仅 AP；US 账户使用 `us_exchange_rates(::TradeContext)`）
 - `profit_analysis(ctx; start, end_)`: 账户总盈亏（summary + sublist 并行 fan-out）
 - `profit_analysis_by_market(ctx; page, size, market, ...)`: 按市场分页盈亏
 - `profit_analysis_detail(ctx, symbol; start, end_)`: 单只证券盈亏明细

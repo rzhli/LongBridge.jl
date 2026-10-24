@@ -40,6 +40,10 @@ export TradeContext,
     us_query_orders,
     us_order_detail,
     us_asset_overview,
+    us_cash_and_buy_power,
+    us_available_holding,
+    us_transaction_history,
+    us_exchange_rates,
     us_realized_pl,
     set_on_order_changed
 
@@ -313,7 +317,7 @@ function handle_command(inner::InnerTradeContext, cmd::AbstractCommand)
             decoder = PB.ProtoDecoder(IOBuffer(resp_body))
             PB.decode(decoder, UnsubResponse)
         elseif cmd isa HttpGetCmd
-            ApiResponse(Client.http_get(inner.config, cmd.path; params = cmd.params))
+            ApiResponse(Client.http_get(inner.config, cmd.path; params = cmd.params, dc_region = cmd.dc_region))
         elseif cmd isa HttpPostCmd
             ApiResponse(Client.http_post(inner.config, cmd.path; body = cmd.body))
         elseif cmd isa HttpPutCmd
@@ -546,6 +550,7 @@ function unsubscribe(ctx::TradeContext, topics::AbstractVector{TopicType.T})
     setdiff!(ctx.inner.subscriptions, str_topics)
 end
 
+"""Paginated executions in either region. Missing `side` becomes `UnknownSide`; quantities/prices use Dec64."""
 function history_executions(
     ctx::TradeContext;
     symbol::Union{String,Nothing} = nothing,
@@ -583,6 +588,7 @@ function history_executions(
     return all_trades
 end
 
+"""AP accounts only. US accounts should use `history_executions`."""
 function all_executions(
     ctx::TradeContext;
     symbol::Union{String,Nothing} = nothing,
@@ -598,7 +604,7 @@ function all_executions(
         end_at = end_at,
         page = page,
     )
-    cmd = HttpGetCmd("/v3/trade/execution/all", to_dict(options), Channel(1))
+    cmd = HttpGetCmd("/v3/trade/execution/all", to_dict(options), Channel(1), :ap)
     resp = request(ctx, cmd)
     if resp.code == 0
         return JSON.parse(JSON.json(resp.data), AllExecutionsResponse)
@@ -727,11 +733,12 @@ function cancel_order(ctx::TradeContext, order_id::AbstractString)
     return nothing
 end
 
+"""AP accounts only. US accounts should use `us_cash_and_buy_power` or `us_asset_overview`."""
 function account_balance(ctx::TradeContext; currency::Union{Currency.T,Nothing} = nothing)
     params =
         isnothing(currency) ? Dict{String,Any}() :
         Dict{String,Any}("currency" => String(Symbol(currency)))
-    cmd = HttpGetCmd("/v1/asset/account", params, Channel(1))
+    cmd = HttpGetCmd("/v1/asset/account", params, Channel(1), :ap)
     resp = request(ctx, cmd)
     if resp.code == 0
         return [construct(AccountBalance, item) for item in resp.data["list"]]
@@ -740,6 +747,7 @@ function account_balance(ctx::TradeContext; currency::Union{Currency.T,Nothing} 
     end
 end
 
+"""AP accounts only. US accounts should use `us_transaction_history`."""
 function cash_flow(
     ctx::TradeContext;
     start_at::Date,
@@ -758,7 +766,7 @@ function cash_flow(
         page = page,
         size = size,
     )
-    cmd = HttpGetCmd("/v1/asset/cashflow", to_dict(options), Channel(1))
+    cmd = HttpGetCmd("/v1/asset/cashflow", to_dict(options), Channel(1), :ap)
     resp = request(ctx, cmd)
     if resp.code == 0
         return [construct(CashFlow, item) for item in resp.data.list]
@@ -767,9 +775,10 @@ function cash_flow(
     end
 end
 
+"""Trade fund holdings, for AP accounts only; there is no US equivalent."""
 function fund_positions(ctx::TradeContext; symbol::Union{Vector{String},Nothing} = nothing)
     options = GetFundPositionsOptions(symbol = symbol)
-    cmd = HttpGetCmd("/v1/asset/fund", to_dict(options), Channel(1))
+    cmd = HttpGetCmd("/v1/asset/fund", to_dict(options), Channel(1), :ap)
     resp = request(ctx, cmd)
     if resp.code == 0
         return JSON.parse(JSON.json(resp.data), FundPositionsResponse)
@@ -778,9 +787,10 @@ function fund_positions(ctx::TradeContext; symbol::Union{Vector{String},Nothing}
     end
 end
 
+"""AP accounts only. US positions are in `us_asset_overview(ctx).stock_list`."""
 function stock_positions(ctx::TradeContext; symbol::Union{String,Nothing} = nothing)
     options = GetStockPositionsOptions(symbol = symbol)
-    cmd = HttpGetCmd("/v1/asset/stock", to_dict(options), Channel(1))
+    cmd = HttpGetCmd("/v1/asset/stock", to_dict(options), Channel(1), :ap)
     resp = request(ctx, cmd)
     if resp.code == 0
         return JSON.parse(JSON.json(resp.data), StockPositionsResponse)
@@ -789,9 +799,10 @@ function stock_positions(ctx::TradeContext; symbol::Union{String,Nothing} = noth
     end
 end
 
+"""AP accounts only; no US equivalent. US account margin is in `us_cash_and_buy_power(ctx).margin_status`."""
 function margin_ratio(ctx::TradeContext, symbol::AbstractString)
     params = Dict{String,Any}("symbol" => String(symbol))
-    cmd = HttpGetCmd("/v1/risk/margin-ratio", params, Channel(1))
+    cmd = HttpGetCmd("/v1/risk/margin-ratio", params, Channel(1), :ap)
     resp = request(ctx, cmd)
     if resp.code == 0
         return construct(MarginRatio, resp.data)
@@ -800,9 +811,10 @@ function margin_ratio(ctx::TradeContext, symbol::AbstractString)
     end
 end
 
+"""AP accounts only. US accounts should use `us_order_detail`."""
 function order_detail(ctx::TradeContext, order_id::AbstractString)
     params = Dict{String,Any}("order_id" => String(order_id))
-    cmd = HttpGetCmd("/v1/trade/order", params, Channel(1))
+    cmd = HttpGetCmd("/v1/trade/order", params, Channel(1), :ap)
     resp = request(ctx, cmd)
     if resp.code == 0
         d = Dict{String,Any}(String(k) => v for (k, v) in resp.data)
@@ -956,6 +968,73 @@ function us_asset_overview(ctx::TradeContext)
     )
     result = USProtocol.construct_us(USAssetOverview, _check_us_response(resp))
     return USProtocol.normalize_symbols!(result)
+end
+
+"""
+    us_cash_and_buy_power(ctx; currency=nothing) -> USCashAndBuyPower
+
+US credentials required. Get buying power, cash by currency and margin status
+from `GET /v1/us/assets/cash-and-buy-power`. Amounts remain decimal strings.
+"""
+function us_cash_and_buy_power(ctx::TradeContext; currency::Union{AbstractString,Nothing} = nothing)
+    params = Dict{String,Any}()
+    isnothing(currency) || (params["currency"] = String(currency))
+    resp = ApiResponse(Client.http_get(ctx.inner.config, "/v1/us/assets/cash-and-buy-power";
+                                      params, dc_region = :us))
+    return USProtocol.construct_us(USCashAndBuyPower, _check_us_response(resp))
+end
+us_cash_and_buy_power(ctx::TradeContext, currency::Union{AbstractString,Nothing}) =
+    us_cash_and_buy_power(ctx; currency)
+
+"""
+    us_available_holding(ctx, options::GetUSAvailableHoldingOptions) -> USAvailableHolding
+
+US credentials required. Quantity available to trade (negative for shorts), via
+`GET /v1/us/assets/available-holding`. Empty equity_type/position_side use STOCK/LONG.
+"""
+function us_available_holding(ctx::TradeContext, options::GetUSAvailableHoldingOptions)
+    params = Dict{String,Any}(
+        "symbol" => options.symbol,
+        "equity_type" => isempty(options.equity_type) ? "STOCK" : options.equity_type,
+        "position_side" => isempty(options.position_side) ? "LONG" : options.position_side,
+    )
+    resp = ApiResponse(Client.http_get(ctx.inner.config, "/v1/us/assets/available-holding";
+                                      params, dc_region = :us))
+    return USProtocol.construct_us(USAvailableHolding, _check_us_response(resp))
+end
+
+"""
+    us_transaction_history(ctx, options::GetUSTransactionHistoryOptions) -> USTransactionHistory
+
+US credentials required. `POST /v1/us/assets/transaction-history` returns one page.
+Request dates and returned create_at/done_at use UTC DateTime. Invalid/missing
+response timestamps become nothing. A page shorter than the requested size is
+the last page; there is no total count. Empty filters are omitted.
+"""
+function us_transaction_history(ctx::TradeContext, options::GetUSTransactionHistoryOptions)
+    body = Dict{String,Any}(
+        "start" => floor(Int64, datetime2unix(options.start_at)),
+        "end" => floor(Int64, datetime2unix(options.end_at)),
+        "page" => options.page > 0 ? options.page : Int32(1),
+        "size" => options.size > 0 ? options.size : Int32(20),
+    )
+    isempty(options.types) || (body["types"] = options.types)
+    isempty(options.currency) || (body["currency"] = options.currency)
+    resp = ApiResponse(Client.http_post(ctx.inner.config, "/v1/us/assets/transaction-history";
+                                       body, dc_region = :us))
+    return USProtocol.construct_us(USTransactionHistory, _check_us_response(resp))
+end
+
+"""
+    us_exchange_rates(ctx) -> USExchangeRates
+
+US credentials required. `GET /v1/us/assets/exchange-rates` flattens the two-level
+map in universal_key/spec_key order, retaining both keys. Rates are strings.
+"""
+function us_exchange_rates(ctx::TradeContext)
+    resp = ApiResponse(Client.http_get(ctx.inner.config, "/v1/us/assets/exchange-rates";
+                                      dc_region = :us))
+    return USProtocol.construct_us(USExchangeRates, _check_us_response(resp))
 end
 
 """Get realized profit and loss for a US-region account."""

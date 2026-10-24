@@ -13,7 +13,10 @@ struct HttpGetCmd <: AbstractCommand
     path::String
     params::Dict{String,Any}
     resp_ch::Channel{Any}
+    dc_region::Union{Symbol,Nothing}
 end
+
+HttpGetCmd(path, params, resp_ch) = HttpGetCmd(path, params, resp_ch, nothing)
 
 struct HttpPostCmd{B} <: AbstractCommand
     path::String

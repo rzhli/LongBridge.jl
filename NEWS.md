@@ -1,5 +1,35 @@
 # Release Notes
 
+## v0.14.0 (2026-10-24)
+
+Syncs `longbridge/openapi` v5.3.0 (`c275573c`), including #612 and #613.
+
+### Fixes
+
+- `option_chain_info_by_date` now sends `POST /v1/quote/options/strikes` with a JSON body. The old GET endpoint returned `404000`; public arguments and `Vector{OptionChainContract}` are unchanged. Dates remain `yyyymmdd` and `standard_only=false` is omitted.
+- Missing/null `Execution.side` becomes `OrderSide.UnknownSide`. The upstream US execution fixture also exposed fractional quantities and Unix-second timestamps: `quantity` and `price` now use `Dec64`, avoiding integer conversion failures and binary floating-point loss. Unix-second strings/numbers follow trade UTC+8 readback semantics; existing ISO DateTime payloads and JSON round trips retain their values.
+- `USCryptoEntry` now retains quantity, market, name, prices, P&L, position side and all remaining upstream holding fields. Its public symbol remains a full Julia SDK symbol (`BTCUSD.BKKT`), accepting both legacy `counter_id` and `symbol` + `market` payloads. Existing keyword and five-argument constructors remain supported.
+
+### US assets
+
+- Adds `us_cash_and_buy_power`, `us_available_holding`, `us_transaction_history`, `us_exchange_rates`, two keyword option structs and nine response types. All four methods require US credentials and use the shared synchronous HTTP client.
+- Holding queries default empty equity type/position side to `STOCK`/`LONG`. Available quantity can be negative for shorts. Transaction requests use UTC `DateTime` bounds as Unix seconds, default nonpositive page/size to 1/20 and omit empty type/currency filters. Each call returns one page; there is no total count.
+- New transaction timestamps are UTC `DateTime` or `nothing`. Missing, null, zero, negative, malformed, boolean, floating-point or beyond-year-9999 timestamps become `nothing`. Page numbers accept JSON integers or integer strings. Amounts and quantities stay strings.
+- Exchange-rate responses flatten `universal_exchanges.<key>.spec_exchanges.<key>.exchanges`, preserving both map keys and sorting by them. Rates accept numeric/string values; missing/null rates become empty strings. Already-flattened responses also round-trip.
+
+### Region restrictions and migration
+
+- AP-only: `account_balance`, `cash_flow`, `stock_positions`, `fund_positions(::TradeContext)`, `margin_ratio`, `all_executions`, `order_detail`, and `exchange_rate(::PortfolioContext)`. US credentials now receive a local `LongBridgeError(403, ...)` before the API request, with endpoint alternatives. Restrictions use credentials, not the market of the traded security, and apply only to these queries; order writes are unaffected.
+- Region errors keep the existing message prefix and append a recovery hint, including existing US fundamentals/order APIs and AP quote/DCA restrictions. Exact message comparisons should use the prefix or the error code instead.
+- Code relying on `Execution.quantity::Int64` / `price::Float64` must accommodate `Dec64`. The new US transaction timestamps are UTC; the trade execution Unix-second readback convention is UTC+8. Do not interchange these DateTimes without converting the timezone semantics.
+- Both READMEs include the AP-to-US method mapping and read-only US asset examples. Python wheel packaging and other language binding changes require no native Julia changes.
+
+### Validation
+
+- Adds offline parsing and loopback HTTP regression tests for option chains, fractional executions and pagination, all four US asset APIs, crypto fields, null/default handling, timestamps, exchange-rate ordering and API-key/OAuth region restrictions. No live account requests are used.
+- Validation on Julia 1.13.2: `julia --project=. --startup-file=no --compiled-modules=existing --compile=min -e 'using Test; @testset "LongBridge regression" begin include("test/runtests.jl") end'` passes all 3,143 assertions. Another 38 checks validate release metadata, API documentation and the syntax of all 20 Julia code blocks in both READMEs. `git diff --check` passes.
+- The committed Manifest records the tested dependency set, including HTTP.jl 2.12.3 and JSON.jl 1.12.2; package compatibility bounds are unchanged.
+
 ## v0.13.0 (2026-10-16)
 
 Syncs `longbridge/openapi` v5.2.2 (`b1e69746`), including attached-order depth levels (#607).

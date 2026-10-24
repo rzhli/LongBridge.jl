@@ -2556,7 +2556,7 @@ end
 
 # ── 期权链 HTTP 端点类型（#588）────────────────────────────────────
 # `option_chain_info_by_date` 迁移到 HTTP 端点
-# `GET /v1/gemini/option/option_chain_list` 后，返回每合约一条的
+# `POST /v1/quote/options/strikes` 后，返回每合约一条的
 # `OptionChainContract`，取代旧的按行权价配对的 `StrikePriceInfo`。
 
 # 期权方向

@@ -699,17 +699,35 @@ end
 # Data Structures
 
 """
-Execution information
+Execution information. Quantity and price use `Dec64`, including fractional
+crypto fills. Missing/null `side` becomes `UnknownSide`. Unix-second timestamps
+use UTC+8, like other trade readbacks; existing ISO DateTime input is preserved.
 """
-struct Execution
+@nonstruct struct Execution
     order_id::String
     trade_id::String
     symbol::String
     trade_done_at::DateTime
-    quantity::Int64
-    price::Float64
+    quantity::Dec64
+    price::Dec64
     side::OrderSide.T
 end
+
+function JSON.lift(::Type{Execution}, obj::AbstractDict)
+    time = obj["trade_done_at"]
+    timestamp = time isa AbstractString ? tryparse(Int64, time) : time
+    done_at = timestamp isa Integer && !(timestamp isa Bool) ? to_china_time(timestamp) :
+        JSON.lift(DateTime, time)
+    side = get(obj, "side", nothing)
+    Execution(String(obj["order_id"]), String(obj["trade_id"]), String(obj["symbol"]),
+              done_at, safeparse(Dec64, obj["quantity"]), safeparse(Dec64, obj["price"]),
+              isnothing(side) ? OrderSide.UnknownSide : JSON.lift(OrderSide.T, side))
+end
+
+construct(::Type{Execution}, obj::JSONObject) = JSON.lift(Execution, obj)
+JSON.lower(value::Execution) = NamedTuple{fieldnames(Execution)}(Tuple(
+    getfield(value, field) for field in fieldnames(Execution)
+))
 
 # --- 多腿组合订单：回读结构（today_orders/history_orders/order_detail/push）---
 

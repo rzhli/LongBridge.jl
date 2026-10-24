@@ -51,11 +51,12 @@ end
     exchange_rate(ctx::PortfolioContext) -> ExchangeRates
 
 查询全部支持币种的汇率（基准币 → 其他币）。
+仅支持 AP 数据中心凭证；US 账户请使用 `us_exchange_rates(::TradeContext)`。
 
 端点：`GET /v1/asset/exchange_rates`
 """
 function exchange_rate(ctx::PortfolioContext)
-    resp = ApiResponse(Client.http_get(ctx.config, "/v1/asset/exchange_rates"))
+    resp = ApiResponse(Client.http_get(ctx.config, "/v1/asset/exchange_rates"; dc_region = :ap))
     _check_or_raise(resp)
     construct(ExchangeRates, resp.data)
 end

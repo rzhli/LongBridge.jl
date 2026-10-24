@@ -154,12 +154,60 @@ function _routing_headers(config::Config.Settings, region::Symbol)
     return headers
 end
 
+# Endpoint names keep these recovery hints useful across SDK naming conventions.
+const AP_REGION_ALTERNATIVES = Dict(
+    "/v1/asset/account" => "use GET /v1/us/assets/cash-and-buy-power or GET /v1/us/assets/overview",
+    "/v1/asset/cashflow" => "use POST /v1/us/assets/transaction-history",
+    "/v1/asset/stock" => "use GET /v1/us/assets/overview (stock_list)",
+    "/v1/asset/exchange_rates" => "use GET /v1/us/assets/exchange-rates",
+    "/v1/trade/order" => "use GET /v1/us/orders/{order_id}",
+    "/v3/trade/execution/all" => "use GET /v1/trade/execution/history",
+    "/v1/risk/margin-ratio" => "there is no US equivalent; account-level margin is at GET /v1/us/assets/cash-and-buy-power (margin_status)",
+    "/v1/asset/fund" => "there is no US equivalent",
+    "quote/brokers" => "there is no US equivalent",
+    "/v1/quote/operatings" => "there is no US equivalent",
+)
+const US_REGION_ALTERNATIVES = Dict(
+    "/v1/us/orders/query" => "use GET /v1/trade/order/today or GET /v1/trade/order/history",
+    "/v1/us/assets/overview" => "use GET /v1/asset/account and GET /v1/asset/stock",
+    "/v1/us/assets/transaction-history" => "use GET /v1/asset/cashflow",
+    "/v1/us/assets/exchange-rates" => "use GET /v1/asset/exchange_rates",
+    "/v1/us/assets/cash-and-buy-power" => "use GET /v1/asset/account",
+    "/v1/us/assets/available-holding" => "use GET /v1/asset/stock (available_quantity)",
+    "/v1/us/stock-info/company-overview" => "use GET /v1/quote/comp-overview",
+    "/v1/us/stock-info/valuation-overview" => "use GET /v1/quote/valuation",
+    "/v1/us/stock-info/finn-overview" => "use GET /v1/quote/financial-reports",
+    "/v1/us/quote/financials/statements" => "use GET /v1/quote/financial-reports",
+    "/v1/us/stock-info/fin-keyfactor" => "use GET /v1/quote/financials/earnings-snapshot",
+    "/v1/us/stock-info/fin-consensus" => "use GET /v1/quote/financial-consensus-detail",
+    "/v1/us/stock-info/etf-dividend-info" => "use GET /v1/quote/dividends",
+    "/v1/us/stock-info/company-dividends" => "use GET /v1/quote/dividends",
+)
+
+function _dc_region_hint(path::String, required::Symbol)
+    if required === :ap
+        hint = get(AP_REGION_ALTERNATIVES, path, "")
+        isempty(hint) || return hint
+        if startswith(path, "/v1/quote/broker-holding") || startswith(path, "/v1/dailycoins/")
+            return "there is no US equivalent"
+        end
+    elseif required === :us
+        hint = get(US_REGION_ALTERNATIVES, path, "")
+        isempty(hint) || return hint
+        startswith(path, "/v1/us/orders/") && return "use GET /v1/trade/order"
+        startswith(path, "/v1/us/") && return "there is no AP equivalent"
+    end
+    return ""
+end
+
 function _check_dc_region(path::String, current::Symbol, required::Union{Symbol,Nothing})
     isnothing(required) && return
     current === required && return
+    hint = _dc_region_hint(path, required)
+    suffix = isempty(hint) ? "" : "; $hint"
     throw(LongBridgeError(
         403,
-        "API endpoint $path requires $(uppercase(String(required))) data-center credentials; current region is $(uppercase(String(current)))",
+        "API endpoint $path requires $(uppercase(String(required))) data-center credentials; current region is $(uppercase(String(current)))$suffix",
     ))
 end
 

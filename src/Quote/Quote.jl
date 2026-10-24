@@ -554,7 +554,7 @@ function _execute_command_once(inner::InnerQuoteContext, cmd::AbstractCommand)
         end
     elseif cmd isa HttpGetCmd
         # Handle HTTP GET requests
-        return Client.http_get(inner.config, cmd.path; params = cmd.params)
+        return Client.http_get(inner.config, cmd.path; params = cmd.params, dc_region = cmd.dc_region)
     elseif cmd isa HttpPostCmd
         return Client.http_post(inner.config, cmd.path; body = cmd.body)
     elseif cmd isa HttpPutCmd
@@ -1137,7 +1137,7 @@ end
 返回每合约一条的 `OptionChainContract`（不再按行权价配对）。只在一侧挂牌的
 行权价现在只有一条记录，调用方应按 `direction` 过滤 call/put。
 
-端点：`GET /v1/gemini/option/option_chain_list`（#588 起改为 HTTP，不再缓存）
+端点：`POST /v1/quote/options/strikes`，参数使用 JSON 请求体，不缓存。
 """
 function option_chain_info_by_date(
     ctx::QuoteContext,
@@ -1152,7 +1152,7 @@ function option_chain_info_by_date(
     # false 与省略等价，只在 true 时发送
     standard_only && (params["standard_only"] = true)
     resp = Errors.ApiResponse(
-        Client.http_get(ctx.inner.config, "/v1/gemini/option/option_chain_list"; params),
+        Client.http_post(ctx.inner.config, "/v1/quote/options/strikes"; body = params),
     )
     resp.code == 0 ||
         @lperror(resp.code, resp.message, get(resp.headers, "x-request-id", nothing))
