@@ -6,21 +6,20 @@
 ## 更新日志
 详细更新说明请见 [NEWS.md](NEWS.md)。
 
-最新版本：**v0.14.0** —— 同步上游 openapi v5.3.0：期权链修复、美区资产接口与数据中心限制。
+最新版本：**v0.15.0** —— 同步上游 openapi v5.4.0：OAuth 撤销、本地清理、PKCE 与类型化错误。
 
-### v0.14.0 更新要点
+### v0.15.0 更新要点
 
-- `option_chain_info_by_date` 改用 `POST /v1/quote/options/strikes`，修复旧地址的 `404000`；签名和返回类型不变。
-- 新增美区资金/购买力、可交易持仓、资金流水和汇率接口，以及配套类型。加密资产持仓补齐数量、价格、盈亏和方向等字段。
-- 成交记录缺失或 null 的 `side` 返回 `OrderSide.UnknownSide`；支持美区小数成交数量。
-- 八个 AP 专属查询在 US 凭证下提前报区域错误，并提示替代接口；区域按账户凭证判断，与交易的股票市场无关。
+- 新增 `revoke!(oauth)` 服务端撤销和 `clear!(oauth)` 本地清理，与令牌刷新串行执行。
+- 浏览器授权使用 PKCE（S256），支持 public 客户端。
+- OAuth 异常提供稳定错误码，保留服务端拒绝原因和底层网络异常。
+- 刷新和撤销请求总超时为 30 秒，授权码交换总超时为 35 秒。
 
-### v0.14.0 迁移说明
+### v0.15.0 迁移说明
 
-- `Execution.quantity` 和 `Execution.price` 改为 `Dec64`；依赖原来 `Int64` / `Float64` 类型的调用方需调整。Unix 秒成交时间按交易模块惯例转为 UTC+8；已有 ISO DateTime 输入保持原值。
-- `USCryptoEntry.symbol` 保留完整代码（如 `BTCUSD.BKKT`），兼容旧 `counter_id`、关键字构造及原五参数构造。
-- 新增 `USTransaction.create_at` / `done_at` 为 UTC `DateTime` 或 `nothing`；请求起止时间同样为 UTC。流水按页返回，无总条数。
-- 区域错误保留 `LongBridgeError(403, ...)` 及原消息前缀，追加替代端点提示。旧版本更新及附加单迁移说明见 [NEWS.md](NEWS.md)。
+- OAuth 失败（包括 API 请求无法取得令牌）改为捕获 `OAuthError`，通过 `.code` 判断原因，不再匹配错误文本或依赖 `LongBridgeError(401, ...)`。
+- 完整解除授权需先 `revoke!` 再 `clear!`；缓存删除失败时，`clear!` 会保留内存令牌。
+- 已有令牌缓存及路径保持兼容；历史 API 和返回类型变更见 [NEWS.md](NEWS.md)。
 
 参考文档：
 
@@ -67,6 +66,54 @@ cfg = Config.from_oauth(oauth)
 ```
 
 首次运行时会打开浏览器进行授权，后续运行自动使用缓存的 Token。
+
+浏览器授权使用 PKCE（S256），支持动态注册的 public 客户端。授权码交换的连接
+超时为 10 秒，总超时为 35 秒；刷新和撤销请求的总超时为 30 秒。Token 请求
+不跟随重定向，也不自动重试。
+
+完整解除 OAuth 授权时，依次调用：
+
+```julia
+revoke!(oauth)  # 在服务器撤销令牌，保留本地副本。
+clear!(oauth)   # 先删除缓存文件，再清空内存中的令牌。
+```
+
+`revoke!` 优先撤销 refresh token，没有时撤销 access token。`clear!` 仅清理本地；
+缓存文件不存在不算错误，删除失败则保留内存令牌。这些操作与刷新共用同一把锁。
+缓存路径仍为 `$LONGBRIDGE_TOKEN_DIR/<client_id>`（设置该环境变量时），否则为
+`~/.longbridge/tokens/<client_id>`。已有 Context 持有同一个 OAuth 句柄；
+需要停止其后台任务和 WebSocket 连接时，调用 `close(ctx)`。
+
+OAuth 失败（包括 API 请求无法取得令牌）现在抛出 `OAuthError`，替代原来的
+`LongBridgeError(401, ...)` 或底层 HTTP 异常。使用 `.code` 和 `OAuthErrorCode`
+判断原因，无需解析错误文本；`.cause` 保留底层网络或文件操作异常。例如：
+
+```julia
+try
+    revoke!(oauth)
+    clear!(oauth)
+catch err
+    if err isa OAuthError
+        @warn "OAuth 操作失败" code=err.code exception=err
+    else
+        rethrow()
+    end
+end
+```
+
+| 错误码 | `OAuthErrorCode` |
+| --- | --- |
+| 0 | `Other` |
+| 1 / 2 | `NoTokenAvailable` / `NoRefreshToken` |
+| 3 / 4 | `RefreshTokenFailed` / `RevokeFailed` |
+| 5 / 6 / 7 | `AuthorizationFailed` / `AuthorizationTimeout` / `ExchangeCodeFailed` |
+| 8 / 9 / 10 / 11 | `CsrfTokenMismatch` / `BindCallbackFailed` / `LocalAddressFailed` / `CallbackChannelClosed` |
+| 12 | `NoHomeDir` |
+| 13 / 14 / 15 / 16 | `TokenFileRead` / `TokenFileParse` / `TokenFileWrite` / `TokenFileDelete` |
+| 17 / 18 | `CreateDirFailed` / `SerializeToken` |
+
+错误码与上游 v5.4.0 一致，例如 `err.code == Int(OAuthErrorCode.RevokeFailed)`。
+读取缓存失败仍会记录日志并忽略，以便 `build` 重新发起授权。
 
 #### 2. API Key（传统方式）
 
@@ -374,6 +421,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Config.from_toml()`: 从 `config.toml` 文件加载配置
 - `Config.from_oauth(oauth_handle)`: 从 OAuth 句柄创建配置
 - `OAuthBuilder(client_id) |> build(open_url_fn)`: 构建 OAuth 句柄，通过浏览器进行授权
+- `revoke!(oauth)` / `clear!(oauth)`: 在服务器撤销令牌 / 清理本地令牌
 - `QuoteContext(config)`: 创建行情上下文；HTTP 拉取无需连接 WS，HTTP 模式下的 WS 专属操作按需建立连接
 - `TradeContext(config)`: 创建并连接 `TradeContext`
 - `disconnect!(ctx)` / `close(ctx)`: 断开连接并停止 Context 的后台任务

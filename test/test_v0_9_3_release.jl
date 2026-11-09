@@ -29,7 +29,7 @@ end
 
     oauth_timeout = LongBridge.HttpClient.OAUTH_TIMEOUT
     @test oauth_timeout.connect == 10
-    @test oauth_timeout.request == 60
+    @test oauth_timeout.request == 35
     @test oauth_timeout.response_header == 10
     @test oauth_timeout.read == 30
 end

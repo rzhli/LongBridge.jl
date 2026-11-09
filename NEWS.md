@@ -1,5 +1,28 @@
 # Release Notes
 
+## v0.15.0 (2026-11-09)
+
+Syncs `longbridge/openapi` v5.4.0 (`63abe9a8`), including #615–#617, #620 and #622.
+
+### OAuth lifecycle and authorization
+
+- Adds `revoke!(oauth)` and `clear!(oauth)`. Revocation sends RFC 7009 `POST /oauth2/revoke`, preferring the refresh token and falling back to the access token; it leaves memory and disk untouched. An empty client ID fails locally. Clear deletes the cached file before clearing memory, tolerates a missing file, and retains the in-memory token if deletion fails. Call revoke then clear to disconnect completely; Context tasks/connections can be stopped with `close(ctx)`.
+- Refresh, revoke and clear share the handle's token lock. Revocation holds it for the entire request, preventing a concurrent refresh from rotating the token mid-revocation. Direct `OAuth.refresh_token!` calls now acquire the lock too. Refreshed/authorized tokens are saved before publishing them in memory.
+- Browser authorization uses a fresh cryptographically random RFC 7636 S256 challenge/verifier pair. The authorization URL carries the challenge; only the code exchange receives the verifier. Callback port 0 uses the actual assigned loopback port. Duplicate callbacks cannot block shutdown, and callback failures retain typed error codes.
+- Refresh/revoke requests have a 30-second total deadline; authorization-code exchange has a 10-second connect timeout and 35-second total deadline. OAuth POSTs disable redirects and automatic retries while continuing to use the process-wide HTTP client. Legacy API-key token-refresh timeouts are unchanged.
+
+### Errors and migration
+
+- Adds `OAuthError <: Exception` with numeric `.code`, `.message` and the underlying `.cause`, plus `OAuthErrorCode` values matching upstream's stable 0–18 table. OAuth failures previously reported as `LongBridgeError(401, ...)` or raw HTTP exceptions must now be caught as `OAuthError`; this also applies when REST/WebSocket setup cannot obtain a token.
+- Server rejection messages retain `Server returned error response: <error>[: <error_description>]`; transport errors retain their underlying cause. Invalid token responses use refresh/exchange error codes. Storage failures have their own codes and are no longer swallowed by refresh fallback.
+- Existing Julia cache paths, persisted JSON schema and the one-hour proactive refresh window are retained. A still-valid access token remains usable after a failed proactive refresh; expired-token refresh failures propagate. Cached-token load failures remain logged and ignored. Missing token-response expiry defaults to one hour, and an omitted/null refresh token preserves the previous refresh token.
+- Both READMEs document disconnect semantics, error-code mapping and exception migration. Rust `oauth2`/`reqwest` changes, FFI-specific breaking changes and optimized Node.js publishing require no native Julia dependency or build changes.
+
+### Validation
+
+- Adds offline and loopback regressions for lifecycle, cache failures, refresh rotation, PKCE exchange, callback errors, builder fallback, error propagation, redirect refusal, request deadlines and concurrent token operations. Tests use temporary credentials and storage, without live account requests.
+- On Julia 1.13.3, `julia --startup-file=no --compiled-modules=existing --compile=min --project=. -e 'using Test; @testset "LongBridge regression" begin include("test/runtests.jl") end'` passes all 3,479 assertions (336 new OAuth checks). Another 72 checks validate release metadata, exports and all 24 Julia code blocks in both READMEs. `git diff --check` passes. Project and Manifest package versions are 0.15.0; dependency versions are unchanged.
+
 ## v0.14.0 (2026-10-24)
 
 Syncs `longbridge/openapi` v5.3.0 (`c275573c`), including #612 and #613.

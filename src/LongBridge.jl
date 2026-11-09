@@ -128,7 +128,7 @@ export Quote,
     utc_iso8601,
     VERSION
 
-export LongBridgeError, UnexpectedHttpResponse, ApiResponse
+export LongBridgeError, UnexpectedHttpResponse, OAuthError, OAuthErrorCode, ApiResponse
 
 # --- Config ---
 export Settings, config, from_oauth                        # 配置加载（config 是 Settings 的兼容别名）
@@ -136,6 +136,7 @@ export enable_papertrading!, dc_region, QuoteTransport
 
 # --- OAuth ---
 export OAuthBuilder, OAuthHandle, OAuthToken, build
+export revoke!, clear!
 
 # --- Constant (Enums) ---
 export Market, Currency

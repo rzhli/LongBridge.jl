@@ -2,7 +2,8 @@ module HttpClient
 
 using HTTP
 
-export HTTP_CLIENT, DEFAULT_TIMEOUT, OAUTH_TIMEOUT, TOKEN_REQUEST_KW, USER_AGENT
+export HTTP_CLIENT, DEFAULT_TIMEOUT, OAUTH_TIMEOUT, TOKEN_REQUEST_KW,
+    OAUTH_REQUEST_KW, OAUTH_TOKEN_TIMEOUT, USER_AGENT
 
 # `LongBridge.VERSION` 在 include 本文件之前已绑定，因此这里可以直接取用，
 # 无需重复解析 Project.toml。
@@ -23,7 +24,8 @@ const USER_AGENT = "openapi-sdk LongBridge.jl/$(_SDK_VERSION)"
 #   （见 `_sleep_retry_delay!`），所以取值高于上游 Rust SDK 的 30s
 #   （那是单次尝试的超时，重试叠加在其之外）。
 const DEFAULT_TIMEOUT = (connect = 10, read = 20, write = 20, request = 60)
-const OAUTH_TIMEOUT = (connect = 10, request = 60, response_header = 10, read = 30)
+const OAUTH_TIMEOUT = (connect = 10, request = 35, response_header = 10, read = 30)
+const OAUTH_TOKEN_TIMEOUT = 30
 const HTTP_TRANSPORT =
     HTTP.Transport(max_idle_per_host = 20, max_idle_total = 20, max_conns_per_host = 20)
 const HTTP_CLIENT = HTTP.Client(
@@ -36,14 +38,27 @@ const HTTP_CLIENT = HTTP.Client(
     write_idle_timeout = DEFAULT_TIMEOUT.write,
 )
 
-# Token 类接口（OAuth 授权/刷新、/v1/token/refresh）共用的请求配置：这些调用比
-# 普通 REST 请求更慢也更少，单独放宽超时，splat 到调用点避免四处重复。
+# Legacy API-key /v1/token/refresh retains its existing timeout policy.
 const TOKEN_REQUEST_KW = (
+    client = HTTP_CLIENT,
+    connect_timeout = 10,
+    request_timeout = 60,
+    response_header_timeout = 10,
+    read_idle_timeout = 30,
+)
+
+# OAuth code exchange: 10s connect / 35s total. Refresh and revoke override
+# the overall deadline to 30s because they hold the token lock. Never replay
+# token-bearing POSTs through redirects or automatic retries.
+const OAUTH_REQUEST_KW = (
     client = HTTP_CLIENT,
     connect_timeout = OAUTH_TIMEOUT.connect,
     request_timeout = OAUTH_TIMEOUT.request,
     response_header_timeout = OAUTH_TIMEOUT.response_header,
     read_idle_timeout = OAUTH_TIMEOUT.read,
+    redirect = false,
+    retry = false,
+    status_exception = false,
 )
 
 end # module HttpClient

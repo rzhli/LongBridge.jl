@@ -38,11 +38,11 @@ end
     @test occursin(LongBridge.VERSION, _HTTPClient.USER_AGENT)
     @test HTTP.header(client.default_headers, "User-Agent") == _HTTPClient.USER_AGENT
 
-    # Token 类接口共用一套放宽的超时
+    # Legacy API-key refresh retains its existing timeout policy.
     kw = _HTTPClient.TOKEN_REQUEST_KW
     @test kw.client === client
     @test kw.connect_timeout == _HTTPClient.OAUTH_TIMEOUT.connect
-    @test kw.request_timeout == _HTTPClient.OAUTH_TIMEOUT.request
+    @test kw.request_timeout == 60
     @test kw.response_header_timeout == _HTTPClient.OAUTH_TIMEOUT.response_header
     @test kw.read_idle_timeout == _HTTPClient.OAUTH_TIMEOUT.read
 end

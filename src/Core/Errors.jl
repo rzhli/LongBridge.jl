@@ -1,8 +1,57 @@
 module Errors
 
-using JSON, HTTP
+using JSON, HTTP, EnumX
 
-export LongBridgeError, UnexpectedHttpResponse, @lperror, ApiResponse
+export LongBridgeError, UnexpectedHttpResponse, OAuthError, OAuthErrorCode, @lperror, ApiResponse
+
+"""Stable OAuth error codes, matching upstream openapi v5.4.0. Codes are never reused."""
+@enumx OAuthErrorCode begin
+    Other = 0
+    NoTokenAvailable = 1
+    NoRefreshToken = 2
+    RefreshTokenFailed = 3
+    RevokeFailed = 4
+    AuthorizationFailed = 5
+    AuthorizationTimeout = 6
+    ExchangeCodeFailed = 7
+    CsrfTokenMismatch = 8
+    BindCallbackFailed = 9
+    LocalAddressFailed = 10
+    CallbackChannelClosed = 11
+    NoHomeDir = 12
+    TokenFileRead = 13
+    TokenFileParse = 14
+    TokenFileWrite = 15
+    TokenFileDelete = 16
+    CreateDirFailed = 17
+    SerializeToken = 18
+end
+
+"""
+    OAuthError
+
+An OAuth failure, including failures obtaining a token for an API request.
+`code::Int` matches `OAuthErrorCode` and upstream's stable numeric codes;
+`message` describes the operation and `cause` retains the underlying exception.
+Catch this type separately from `LongBridgeError` (server OpenAPI errors).
+"""
+struct OAuthError <: Exception
+    code::Int
+    message::String
+    cause::Union{Nothing,Exception}
+end
+
+OAuthError(code::OAuthErrorCode.T, message::AbstractString, cause = nothing) =
+    OAuthError(Int(code), String(message), cause)
+
+function Base.showerror(io::IO, e::OAuthError)
+    print(io, "OAuthError(code=", e.code, ", message=", e.message)
+    if !isnothing(e.cause)
+        print(io, ": ")
+        showerror(io, e.cause)
+    end
+    print(io, ")")
+end
 
 # `ApiResponse` 构造时已将 header 名归一化为小写，因此这里只需一次 O(1) 查询。
 function _header_value(headers::Dict{String,String}, name::String)

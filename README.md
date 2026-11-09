@@ -6,21 +6,20 @@ This is an unofficial SDK, currently for personal use only. Some functions in th
 ## Release Notes
 See [NEWS.md](NEWS.md) for detailed release notes.
 
-Latest release: **v0.14.0** — sync with upstream openapi v5.3.0: option-chain fixes, US assets and data-center restrictions.
+Latest release: **v0.15.0** — sync with upstream openapi v5.4.0: OAuth revocation, local cleanup, PKCE and typed errors.
 
-### v0.14.0 highlights
+### v0.15.0 highlights
 
-- `option_chain_info_by_date` now uses `POST /v1/quote/options/strikes`, fixing the old endpoint's `404000`; its signature and return type are unchanged.
-- Adds US cash/buying power, available holdings, transaction history and exchange rates with typed options/responses. Crypto holdings now retain quantity, prices, P&L and position side.
-- Missing/null execution `side` defaults to `OrderSide.UnknownSide`; fractional US executions are supported.
-- Eight AP-only queries reject US credentials before sending the API request and name alternatives. Regions refer to account credentials, independent of the security's market.
+- Adds `revoke!(oauth)` for server revocation and `clear!(oauth)` for local cleanup, serialized with token refresh.
+- Browser authorization uses PKCE (S256), supporting public clients.
+- OAuth failures expose stable error codes and preserve server rejection details and transport causes.
+- Refresh/revoke requests have a 30-second deadline; code exchange has a 35-second deadline.
 
-### v0.14.0 migration notes
+### v0.15.0 migration notes
 
-- `Execution.quantity` and `Execution.price` now use `Dec64`; adjust code expecting `Int64` / `Float64`. Unix-second execution timestamps follow the trade module's UTC+8 convention; existing ISO DateTime input is preserved.
-- `USCryptoEntry.symbol` remains a full symbol such as `BTCUSD.BKKT`; legacy `counter_id`, keyword construction and the original five-argument constructor remain supported.
-- New `USTransaction.create_at` / `done_at` are UTC `DateTime` or `nothing`. Request bounds are also UTC. Transaction history returns one page, with no total count.
-- Region errors retain `LongBridgeError(403, ...)` and the old message prefix, appending alternative endpoints. Historical changes and attached-order migration notes are in [NEWS.md](NEWS.md).
+- Catch `OAuthError` for OAuth failures, including failures obtaining a token for API requests; inspect `.code` instead of matching messages or expecting `LongBridgeError(401, ...)`.
+- Call `revoke!` then `clear!` to disconnect completely. `clear!` preserves the in-memory token if cache deletion fails.
+- Existing cached tokens and their paths remain compatible. Historical API and response-type changes are in [NEWS.md](NEWS.md).
 
 References:
 
@@ -67,6 +66,58 @@ cfg = Config.from_oauth(oauth)
 ```
 
 On first run, this opens the browser for authorization. Subsequent runs use the cached token automatically.
+
+Browser authorization uses PKCE (S256), including for dynamically registered public clients.
+The authorization-code exchange has a 10-second connect timeout and a 35-second total
+timeout; refresh and revocation requests are bounded to 30 seconds. Token requests
+do not follow redirects or retry automatically.
+
+To disconnect the OAuth application completely:
+
+```julia
+revoke!(oauth)  # Revoke on the server; keep the local token.
+clear!(oauth)   # Delete the cached file, then clear the in-memory token.
+```
+
+`revoke!` prefers the refresh token, falling back to the access token. `clear!` only
+acts locally; a missing cache file is harmless, and a deletion failure keeps the
+in-memory token. These operations share the token lock with refresh. Token storage
+remains `$LONGBRIDGE_TOKEN_DIR/<client_id>` when set, otherwise
+`~/.longbridge/tokens/<client_id>`. Existing Contexts retain the same OAuth handle;
+use `close(ctx)` to stop their background tasks and WebSocket connections.
+
+OAuth failures, including failure to obtain a token for an API request, now throw
+`OAuthError` instead of `LongBridgeError(401, ...)` or a raw HTTP exception. Use
+`err.code` and `OAuthErrorCode` instead of parsing messages; `err.cause` retains
+underlying transport or storage errors. For example:
+
+```julia
+try
+    revoke!(oauth)
+    clear!(oauth)
+catch err
+    if err isa OAuthError
+        @warn "OAuth operation failed" code=err.code exception=err
+    else
+        rethrow()
+    end
+end
+```
+
+| Code | `OAuthErrorCode` |
+| --- | --- |
+| 0 | `Other` |
+| 1 / 2 | `NoTokenAvailable` / `NoRefreshToken` |
+| 3 / 4 | `RefreshTokenFailed` / `RevokeFailed` |
+| 5 / 6 / 7 | `AuthorizationFailed` / `AuthorizationTimeout` / `ExchangeCodeFailed` |
+| 8 / 9 / 10 / 11 | `CsrfTokenMismatch` / `BindCallbackFailed` / `LocalAddressFailed` / `CallbackChannelClosed` |
+| 12 | `NoHomeDir` |
+| 13 / 14 / 15 / 16 | `TokenFileRead` / `TokenFileParse` / `TokenFileWrite` / `TokenFileDelete` |
+| 17 / 18 | `CreateDirFailed` / `SerializeToken` |
+
+The codes match upstream v5.4.0. For example, compare
+`err.code == Int(OAuthErrorCode.RevokeFailed)`. Cached-token load failures are still
+logged and ignored so that `build` can start a new authorization flow.
 
 #### 2. API Key (Legacy)
 
@@ -381,6 +432,7 @@ Quote.unsubscribe(ctx, ["GOOGL.US"], [SubType.QUOTE, SubType.DEPTH])
 - `Config.from_toml()`: Load configuration from `config.toml` file
 - `Config.from_oauth(oauth_handle)`: Create configuration from an OAuth handle
 - `OAuthBuilder(client_id) |> build(open_url_fn)`: Build an OAuth handle with browser-based authorization
+- `revoke!(oauth)` / `clear!(oauth)`: Revoke the token on the server / remove it locally
 - `QuoteContext(config)`: Create a quote context; HTTP pulls are socket-free, while WS-only operations connect on demand in HTTP mode
 - `TradeContext(config)`: Create and connect to `TradeContext`
 - `disconnect!(ctx)` / `close(ctx)`: Disconnect and stop the Context background tasks
